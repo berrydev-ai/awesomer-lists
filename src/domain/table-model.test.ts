@@ -153,9 +153,33 @@ describe("buildTableFacets", () => {
       now: new Date("2026-07-09T12:00:00Z"),
     });
 
-    expect(facets.total).toBe(3);
+    expect(facets.total).toBe(2);
     expect(facets.maintenance).toMatchObject({ active: 1, quiet: 1, stale: 0 });
     expect(facets.licenses).toEqual([{ value: "MIT", count: 2 }]);
+  });
+
+  it("separates confirmed missing licenses from unavailable metadata", () => {
+    const entries = [
+      createEntry("vitejs/vite", ["Frameworks"]),
+      createEntry("missing/project", ["Frameworks"]),
+    ];
+
+    const facets = buildTableFacets(
+      entries,
+      [createMetadata("vitejs/vite", 10)],
+      {
+        query: "",
+        hideArchived: false,
+        updatedWithinDays: null,
+        sort: { field: "license", direction: "asc" },
+        now: new Date("2026-07-09T12:00:00Z"),
+      },
+    );
+
+    expect(facets.licenses).toEqual([
+      { value: "No license", count: 1 },
+      { value: "Unavailable", count: 1 },
+    ]);
   });
 });
 

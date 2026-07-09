@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@fontsource/geist": "5.2.9",
+    "@fontsource/geist-mono": "5.2.8",
     "@types/chrome": "0.2.2",
     "esbuild": "0.28.1",
     "happy-dom": "20.10.6",

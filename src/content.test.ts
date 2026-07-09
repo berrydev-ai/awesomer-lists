@@ -9,8 +9,12 @@ type ContentListener = (message: unknown) => void;
 let contentListener: ContentListener | null;
 let connected: boolean;
 let sendMessage: ReturnType<typeof vi.fn>;
+let modalShadowRoot: ShadowRoot | null;
+let removeWindowListener: ReturnType<typeof vi.spyOn>;
+const nativeAttachShadow = Element.prototype.attachShadow;
 
 beforeEach(async () => {
+  vi.restoreAllMocks();
   vi.resetModules();
   document.getElementById("awesomer-lists-extension-root")?.remove();
   (
@@ -18,6 +22,16 @@ beforeEach(async () => {
   ).happyDOM.setURL("https://github.com/sindresorhus/awesome#readme");
   contentListener = null;
   connected = false;
+  modalShadowRoot = null;
+  removeWindowListener = vi.spyOn(window, "removeEventListener");
+  vi.spyOn(Element.prototype, "attachShadow").mockImplementation(function (
+    this: Element,
+    options: ShadowRootInit,
+  ) {
+    const root = nativeAttachShadow.call(this, options);
+    if (this.id === "awesomer-lists-extension-root") modalShadowRoot = root;
+    return root;
+  });
   sendMessage = vi.fn(async (request: ExtensionRequest) => {
     if (request.type === "auth.status") {
       return {
@@ -58,7 +72,7 @@ beforeEach(async () => {
               stars: 20_000,
               forks: 1_500,
               openIssues: 125,
-              lastCommitAt: "2026-07-08T12:00:00Z",
+              lastCommitAt: new Date().toISOString(),
               license: "Apache-2.0",
               isArchived: false,
               fetchedAt: "2026-07-09T12:00:00Z",
@@ -85,6 +99,9 @@ beforeEach(async () => {
         }),
       },
       sendMessage,
+      getURL: vi.fn((path: string) =>
+        path === "token.html" ? "about:blank" : `chrome-extension://test/${path}`,
+      ),
     },
   } as unknown as typeof chrome;
 
@@ -95,22 +112,31 @@ describe("content modal workflow", () => {
   it("moves from dedicated-token setup to an exact sortable project table", async () => {
     contentListener?.({ type: "awesomer.toggle" });
 
-    const shadow = await waitUntil(() =>
-      document.getElementById("awesomer-lists-extension-root")?.shadowRoot ?? null,
-    );
+    const shadow = await waitUntil(() => modalShadowRoot);
+    expect(
+      document.getElementById("awesomer-lists-extension-root")?.shadowRoot,
+    ).toBeNull();
     const authView = await waitUntil(() => {
       const view = shadow.querySelector<HTMLElement>("#auth-view");
       return view && !view.hidden ? view : null;
     });
     expect(authView.hidden).toBe(false);
 
-    const tokenInput = shadow.querySelector<HTMLInputElement>("#token-input");
-    const authForm = shadow.querySelector<HTMLFormElement>("#auth-form");
-    if (!tokenInput || !authForm) throw new Error("Token form was not rendered.");
-
-    tokenInput.value = "dedicated-token-value-for-test";
-    authForm.dispatchEvent(
-      new Event("submit", { bubbles: true, cancelable: true }),
+    expect(shadow.querySelector('input[type="password"]')).toBeNull();
+    const tokenFrame = shadow.querySelector<HTMLIFrameElement>("#token-frame");
+    if (!tokenFrame?.contentWindow) {
+      throw new Error("Secure token frame was not rendered.");
+    }
+    connected = true;
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: tokenFrame.contentWindow,
+        origin: new URL("about:blank").origin,
+        data: {
+          type: "awesomer.auth.saved",
+          auth: { hasToken: true, remembered: false, login: "octocat" },
+        },
+      }),
     );
 
     const projectLink = await waitUntil(() =>
@@ -120,6 +146,11 @@ describe("content modal workflow", () => {
 
     expect(projectLink.textContent).toBe("Mastra");
     expect(popularity?.textContent).toContain("20,000");
+    expect(shadow.querySelector('[role="table"]')).not.toBeNull();
+    expect(shadow.querySelectorAll('.project-row [role="cell"]')).toHaveLength(
+      6,
+    );
+    expect(shadow.querySelector('.group-row [role="rowheader"]')).not.toBeNull();
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "metadata.load",
@@ -152,6 +183,8 @@ describe("content modal workflow", () => {
       .querySelector<HTMLButtonElement>('[data-accent="rose"]')
       ?.click();
     expect(dialog.dataset.accent).toBe("rose");
+    shadow.querySelector<HTMLButtonElement>("#settings-close")?.click();
+    await Promise.resolve();
 
     const activeChip = shadow.querySelector<HTMLButtonElement>(
       '[data-maintenance="active"]',
@@ -166,6 +199,16 @@ describe("content modal workflow", () => {
     expect(shadow.querySelector("#license-filter-panel")?.textContent).toContain(
       "Apache-2.0",
     );
+    const licenseOption = shadow.querySelector<HTMLButtonElement>(
+      '#license-filter-options [data-filter-value="Apache-2.0"]',
+    );
+    licenseOption?.click();
+    await Promise.resolve();
+    expect(shadow.activeElement?.textContent).toContain("Apache-2.0");
+    shadow.querySelector<HTMLInputElement>("#search-input")?.click();
+    expect(
+      shadow.querySelector<HTMLElement>("#license-filter-panel")?.hidden,
+    ).toBe(true);
 
     const collapseButton = shadow.querySelector<HTMLButtonElement>(
       "#toggle-groups-button",
@@ -179,6 +222,55 @@ describe("content modal workflow", () => {
     expect(
       shadow.querySelector<HTMLAnchorElement>("#project-repository-link")?.href,
     ).toBe("https://github.com/berrydev-ai/awesomer-lists");
+
+    const metadataCallsBeforeClose = sendMessage.mock.calls.filter(
+      ([request]) => request.type === "metadata.load",
+    ).length;
+    contentListener?.({ type: "awesomer.toggle" });
+    expect(document.getElementById("awesomer-lists-extension-root")).toBeNull();
+    expect(removeWindowListener).toHaveBeenCalledWith(
+      "message",
+      expect.any(Function),
+    );
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: tokenFrame.contentWindow,
+        origin: new URL("about:blank").origin,
+        data: {
+          type: "awesomer.auth.saved",
+          auth: { hasToken: true, remembered: false, login: "octocat" },
+        },
+      }),
+    );
+    await Promise.resolve();
+    expect(
+      sendMessage.mock.calls.filter(
+        ([request]) => request.type === "metadata.load",
+      ),
+    ).toHaveLength(metadataCallsBeforeClose);
+
+    const previousShadow = modalShadowRoot;
+    contentListener?.({ type: "awesomer.toggle" });
+    const reopenedShadow = await waitUntil(() =>
+      modalShadowRoot && modalShadowRoot !== previousShadow
+        ? modalShadowRoot
+        : null,
+    );
+    await waitUntil(() => reopenedShadow.querySelector(".project-row"));
+    const reopenedTokenFrame = reopenedShadow.querySelector<HTMLIFrameElement>(
+      "#token-frame",
+    );
+    if (!reopenedTokenFrame?.contentWindow) {
+      throw new Error("Reopened secure token frame was not rendered.");
+    }
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: reopenedTokenFrame.contentWindow,
+        origin: new URL("about:blank").origin,
+        data: { type: "awesomer.auth.key", key: "Escape" },
+      }),
+    );
+    expect(document.getElementById("awesomer-lists-extension-root")).toBeNull();
   });
 });
 

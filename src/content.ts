@@ -5,7 +5,11 @@ import {
   type MaintenanceStatus,
 } from "./domain/maintenance";
 import { parseAwesomeList } from "./domain/awesome-list";
-import { buildTableFacets, buildTableGroups } from "./domain/table-model";
+import {
+  buildTableFacets,
+  buildTableGroups,
+  getProjectLicenseLabel,
+} from "./domain/table-model";
 import type {
   AwesomeEntry,
   RepositoryMetadata,
@@ -23,6 +27,7 @@ import type {
 import { formatRepositoryCount } from "./ui/format";
 
 const ROOT_ID = "awesomer-lists-extension-root";
+let activeModalCleanup: (() => void) | null = null;
 
 interface RequestFailure extends Error {
   code: string;
@@ -443,7 +448,7 @@ const REDESIGN_STYLES = `
     --mute-bg: oklch(1 0 0 / 0.06);
     --accent: oklch(var(--accent-l) var(--accent-c) var(--accent-h));
     --accent-soft: oklch(var(--accent-l) var(--accent-c) var(--accent-h) / 0.16);
-    --link: oklch(0.79 calc(var(--accent-c) * 0.82) var(--accent-h));
+    --link: oklch(0.79 var(--accent-c) var(--accent-h));
     --cols: minmax(250px, 1fr) 116px 124px 128px 104px 118px;
     position: relative;
     width: min(980px, calc(100vw - 32px));
@@ -513,6 +518,15 @@ const REDESIGN_STYLES = `
       --header-muted: oklch(0.55 0.01 265);
       --btn-bg: oklch(0 0 0 / 0.05);
       --input-bg: oklch(1 0 0);
+      --star: oklch(0.60 0.12 88);
+      --ok: oklch(0.48 0.14 155);
+      --ok-bg: oklch(0.48 0.14 155 / 0.12);
+      --warn: oklch(0.56 0.12 72);
+      --warn-bg: oklch(0.56 0.12 72 / 0.14);
+      --bad: oklch(0.53 0.17 30);
+      --bad-bg: oklch(0.53 0.17 30 / 0.12);
+      --mute: oklch(0.50 0.01 265);
+      --mute-bg: oklch(0 0 0 / 0.05);
       --accent-soft: oklch(var(--accent-l) var(--accent-c) var(--accent-h) / 0.12);
       --link: oklch(0.52 var(--accent-c) var(--accent-h));
     }
@@ -542,6 +556,7 @@ const REDESIGN_STYLES = `
     font-family: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
     font-size: 12px;
   }
+  .source-link:hover { color: var(--header-fg); }
   .icon-button {
     width: 34px;
     height: 34px;
@@ -556,7 +571,14 @@ const REDESIGN_STYLES = `
   }
   .icon-button:hover { background: var(--row-hover); }
 
-  .settings-scrim { position: absolute; inset: 0; z-index: 20; }
+  .settings-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
   .settings-panel {
     position: absolute;
     top: 56px;
@@ -607,6 +629,7 @@ const REDESIGN_STYLES = `
   .settings-form label { color: var(--text-muted); font-size: 12px; }
   .settings-note { margin: 0; color: var(--text-faint); font-size: 11px; line-height: 1.45; }
   .settings-actions { display: flex; align-items: center; gap: 8px; }
+  .token-frame { width: 100%; height: 208px; border: 0; background: transparent; }
   .appearance-control { display: grid; gap: 7px; margin-top: 12px; }
   .appearance-control > span { color: var(--text-muted); font-size: 12px; }
   .theme-segment {
@@ -665,8 +688,10 @@ const REDESIGN_STYLES = `
     box-shadow: 0 0 0 3px var(--accent-soft);
   }
   .primary-button { border-color: var(--accent); background: var(--accent); color: white; }
-  .primary-button:hover { filter: brightness(0.95); }
+  .primary-button:hover { background: var(--accent); filter: brightness(0.95); }
   .secondary-button { border-color: var(--border-strong); background: var(--btn-bg); color: var(--text); }
+  .secondary-button:hover { background: var(--row-hover); }
+  .check-row input { accent-color: var(--accent); }
 
   .main-view { display: flex; flex-direction: column; background: var(--panel); }
   .toolbar {
@@ -757,6 +782,7 @@ const REDESIGN_STYLES = `
     left: 0;
     z-index: 30;
     width: 208px;
+    max-height: min(320px, calc(100vh - 180px));
     display: flex;
     flex-direction: column;
     gap: 1px;
@@ -765,6 +791,7 @@ const REDESIGN_STYLES = `
     border-radius: 12px;
     background: var(--panel);
     box-shadow: 0 18px 44px -14px rgb(0 0 0 / 55%);
+    overflow-y: auto;
   }
   .header-cell:last-child .filter-panel { right: 0; left: auto; }
   .filter-heading { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px 8px; border-bottom: 1px solid var(--border); }
@@ -797,6 +824,12 @@ const REDESIGN_STYLES = `
     position: sticky;
     top: 37px;
     z-index: 2;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-2);
+  }
+  .group-row:hover { background: var(--row-hover); }
+  .group-header { width: 100%; }
+  .group-button {
     width: 100%;
     min-height: 36px;
     display: flex;
@@ -804,13 +837,11 @@ const REDESIGN_STYLES = `
     gap: 10px;
     padding: 9px 20px;
     border: 0;
-    border-bottom: 1px solid var(--border);
     border-radius: 0;
-    background: var(--panel-2);
+    background: transparent;
     color: var(--text);
     text-align: left;
   }
-  .group-row:hover { background: var(--row-hover); }
   .group-chevron { width: 10px; color: var(--text-muted); font-size: 9px; }
   .group-title { font-size: 13px; font-weight: 600; }
   .group-count { color: var(--text-faint); font-family: "Geist Mono", ui-monospace, monospace; font-size: 11px; }
@@ -878,10 +909,15 @@ chrome.runtime.onMessage.addListener((message: unknown) => {
   const existing = document.getElementById(ROOT_ID);
 
   if (existing) {
-    existing.remove();
+    if (activeModalCleanup) {
+      activeModalCleanup();
+    } else {
+      existing.remove();
+    }
     return;
   }
 
+  activeModalCleanup?.();
   void openModal();
 });
 
@@ -980,15 +1016,30 @@ function appendEmptyValue(cell: HTMLElement): void {
 async function openModal(): Promise<void> {
   const page = parseGitHubRepositoryPage(location.href);
   const currentRawSource = page ? findCurrentRawSource(page) : null;
+  const previousFocus =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const host = document.createElement("div");
   host.id = ROOT_ID;
   document.documentElement.append(host);
-  const shadow = host.attachShadow({ mode: "open" });
+  // A closed root protects modal state; token entry uses an extension-origin frame.
+  const shadow = host.attachShadow({ mode: "closed" });
+  const fontUrl = (fileName: string): string =>
+    chrome.runtime.getURL(`fonts/${fileName}`);
+  const tokenPageUrl = chrome.runtime.getURL("token.html");
+  const tokenPageOrigin = new URL(tokenPageUrl).origin;
+  const fontStyles = `
+    @font-face { font-family: "Geist"; src: url("${fontUrl("geist-latin-400-normal.woff2")}") format("woff2"); font-style: normal; font-weight: 400; font-display: swap; }
+    @font-face { font-family: "Geist"; src: url("${fontUrl("geist-latin-500-normal.woff2")}") format("woff2"); font-style: normal; font-weight: 500; font-display: swap; }
+    @font-face { font-family: "Geist"; src: url("${fontUrl("geist-latin-600-normal.woff2")}") format("woff2"); font-style: normal; font-weight: 600; font-display: swap; }
+    @font-face { font-family: "Geist"; src: url("${fontUrl("geist-latin-700-normal.woff2")}") format("woff2"); font-style: normal; font-weight: 700; font-display: swap; }
+    @font-face { font-family: "Geist Mono"; src: url("${fontUrl("geist-mono-latin-400-normal.woff2")}") format("woff2"); font-style: normal; font-weight: 400; font-display: swap; }
+    @font-face { font-family: "Geist Mono"; src: url("${fontUrl("geist-mono-latin-500-normal.woff2")}") format("woff2"); font-style: normal; font-weight: 500; font-display: swap; }
+  `;
 
   shadow.innerHTML = `
-    <style>${STYLES}${REDESIGN_STYLES}</style>
+    <style>${fontStyles}${STYLES}${REDESIGN_STYLES}</style>
     <div class="backdrop" id="backdrop">
-      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="awesomer-title" data-theme="system" data-accent="indigo">
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="awesomer-title" data-theme="system" data-accent="indigo" tabindex="-1">
         <header class="header">
           <div class="brand-mark" aria-hidden="true">✦</div>
           <div class="title-block">
@@ -1005,7 +1056,7 @@ async function openModal(): Promise<void> {
           </div>
         </header>
         <button class="settings-scrim" id="settings-scrim" type="button" aria-label="Close settings" hidden></button>
-        <aside class="settings-panel" id="settings-panel" aria-label="Settings" hidden>
+        <aside class="settings-panel" id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings" hidden>
           <div class="settings-heading">
             <span>Settings</span>
             <button class="icon-button" id="settings-close" type="button" aria-label="Close settings">
@@ -1019,28 +1070,22 @@ async function openModal(): Promise<void> {
               <span class="connection-copy">Connected as <strong id="settings-login">GitHub user</strong></span>
               <button class="compact-button" id="settings-disconnect" type="button">Disconnect</button>
             </div>
-            <form class="settings-form" id="settings-auth-form">
-              <label for="settings-token-input">Replace personal access token</label>
-              <input class="token-input" id="settings-token-input" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
-              <label class="check-row"><input id="settings-remember-token" type="checkbox"><span>Remember on this device</span></label>
-              <div class="settings-actions">
-                <button class="compact-button" id="settings-save-token" type="submit">Save token</button>
-                <span class="inline-error" id="settings-auth-error" role="alert" hidden></span>
-              </div>
-              <p class="settings-note">Use a dedicated, read-only token. Public repositories only; write permissions are not needed.</p>
-            </form>
+            <div class="settings-actions">
+              <button class="compact-button" id="settings-replace-token" type="button">Replace token</button>
+            </div>
+            <p class="settings-note">Token entry opens in an extension-owned frame. Use a dedicated, read-only token; write permissions are not needed.</p>
           </div>
           <div class="settings-section">
             <div class="eyebrow">Appearance</div>
-            <label class="appearance-control">
+            <div class="appearance-control">
               <span>Theme</span>
               <span class="theme-segment">
                 <button class="theme-button" type="button" data-theme-mode="system" aria-pressed="true">System</button>
                 <button class="theme-button" type="button" data-theme-mode="light" aria-pressed="false">Light</button>
                 <button class="theme-button" type="button" data-theme-mode="dark" aria-pressed="false">Dark</button>
               </span>
-            </label>
-            <label class="appearance-control">
+            </div>
+            <div class="appearance-control">
               <span>Accent color</span>
               <span class="swatches">
                 <button class="swatch" type="button" data-accent="indigo" title="Indigo" aria-label="Indigo" aria-pressed="true"></button>
@@ -1051,10 +1096,10 @@ async function openModal(): Promise<void> {
                 <button class="swatch" type="button" data-accent="orange" title="Orange" aria-label="Orange" aria-pressed="false"></button>
                 <button class="swatch" type="button" data-accent="rose" title="Rose" aria-label="Rose" aria-pressed="false"></button>
               </span>
-            </label>
+            </div>
           </div>
         </aside>
-        <div class="body">
+        <div class="body" id="dialog-body">
           <div class="center-view" id="unsupported-view" hidden>
             <div class="panel">
               <h2>Open a GitHub repository</h2>
@@ -1064,7 +1109,7 @@ async function openModal(): Promise<void> {
           </div>
 
           <div class="center-view" id="auth-view" hidden>
-            <form class="panel" id="auth-form">
+            <div class="panel">
               <h2>Connect a dedicated GitHub token</h2>
               <p>Awesomer Lists uses read-only access to batch exact repository metadata.</p>
               <ol>
@@ -1072,20 +1117,13 @@ async function openModal(): Promise<void> {
                 <li>Set an expiration date. Public repositories are readable by default.</li>
                 <li>Set <strong>Issues</strong> to <strong>Read-only</strong>. Leave every write permission off.</li>
               </ol>
-              <label class="field-label" for="token-input">Personal access token</label>
-              <input class="token-input" id="token-input" name="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…" required>
-              <label class="check-row">
-                <input id="remember-token" type="checkbox">
-                <span>Remember on this device</span>
-              </label>
-              <p class="storage-warning">Off by default. Remembered tokens use Chrome extension storage, which is local but is not a password vault.</p>
+              <iframe class="token-frame" id="token-frame" title="Secure GitHub token entry"></iframe>
               <div class="button-row">
-                <button class="primary-button" id="save-token" type="submit">Save and analyze</button>
                 <button class="secondary-button" id="cancel-auth" type="button" hidden>Cancel</button>
                 <button class="danger-button" id="remove-token" type="button" hidden>Remove token</button>
               </div>
               <p class="inline-error" id="auth-error" role="alert" hidden></p>
-            </form>
+            </div>
           </div>
 
           <div class="center-view" id="loading-view" hidden>
@@ -1146,7 +1184,7 @@ async function openModal(): Promise<void> {
               </div>
             </div>
             <div class="table-wrap" id="table-wrap">
-              <div class="table-content">
+              <div class="table-content" role="table" aria-label="Awesome list projects">
                 <div class="table-header grid-row" role="row">
                   <div class="header-cell" role="columnheader"><button class="sort-button" type="button" data-sort="name">Project <span class="sort-indicator"></span></button></div>
                   <div class="header-cell" role="columnheader">
@@ -1206,6 +1244,7 @@ async function openModal(): Promise<void> {
   ].map((id) => requiredElement<HTMLElement>(shadow, `#${id}`));
   const sourceLink = requiredElement<HTMLAnchorElement>(shadow, "#source-link");
   const dialog = requiredElement<HTMLElement>(shadow, ".dialog");
+  const dialogBody = requiredElement<HTMLElement>(shadow, "#dialog-body");
   const settingsButton = requiredElement<HTMLButtonElement>(
     shadow,
     "#settings-button",
@@ -1216,27 +1255,10 @@ async function openModal(): Promise<void> {
     "#settings-scrim",
   );
   const settingsLogin = requiredElement<HTMLElement>(shadow, "#settings-login");
-  const settingsTokenInput = requiredElement<HTMLInputElement>(
-    shadow,
-    "#settings-token-input",
-  );
-  const settingsRememberToken = requiredElement<HTMLInputElement>(
-    shadow,
-    "#settings-remember-token",
-  );
-  const settingsAuthError = requiredElement<HTMLElement>(
-    shadow,
-    "#settings-auth-error",
-  );
-  const tokenInput = requiredElement<HTMLInputElement>(shadow, "#token-input");
-  const rememberToken = requiredElement<HTMLInputElement>(
-    shadow,
-    "#remember-token",
-  );
+  const tokenFrame = requiredElement<HTMLIFrameElement>(shadow, "#token-frame");
   const authError = requiredElement<HTMLElement>(shadow, "#auth-error");
   const cancelAuth = requiredElement<HTMLButtonElement>(shadow, "#cancel-auth");
   const removeToken = requiredElement<HTMLButtonElement>(shadow, "#remove-token");
-  const saveToken = requiredElement<HTMLButtonElement>(shadow, "#save-token");
   const loadingTitle = requiredElement<HTMLElement>(shadow, "#loading-title");
   const loadingDetail = requiredElement<HTMLElement>(shadow, "#loading-detail");
   const errorMessage = requiredElement<HTMLElement>(shadow, "#error-message");
@@ -1272,12 +1294,29 @@ async function openModal(): Promise<void> {
     "#license-filter-options",
   );
 
-  const close = (): void => host.remove();
+  let tokenMessageHandler: ((event: MessageEvent) => void) | null = null;
+  const close = (): void => {
+    if (tokenMessageHandler) {
+      window.removeEventListener("message", tokenMessageHandler);
+    }
+    host.remove();
+    if (activeModalCleanup === close) activeModalCleanup = null;
+    previousFocus?.focus();
+  };
+  activeModalCleanup = close;
   const showView = (id: string): void => {
     views.forEach((view) => {
       view.hidden = view.id !== id;
     });
+    if (id !== "auth-view") queueMicrotask(() => dialog.focus());
   };
+
+  const getFocusableElements = (scope: ParentNode): HTMLElement[] =>
+    [
+      ...scope.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), iframe, input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter((element) => !element.closest("[hidden]"));
 
   const renderAppearance = (): void => {
     dialog.setAttribute("data-theme", state.themeMode);
@@ -1304,11 +1343,16 @@ async function openModal(): Promise<void> {
     state.settingsOpen = open;
     settingsPanel.hidden = !open;
     settingsScrim.hidden = !open;
+    dialogBody.inert = open;
     settingsButton.setAttribute("aria-expanded", String(open));
     settingsLogin.textContent = state.auth?.login ?? "GitHub user";
-    settingsRememberToken.checked = state.auth?.remembered ?? false;
-    settingsTokenInput.value = "";
-    settingsAuthError.hidden = true;
+    queueMicrotask(() => {
+      if (open) {
+        requiredElement<HTMLButtonElement>(shadow, "#settings-close").focus();
+      } else {
+        settingsButton.focus();
+      }
+    });
   };
 
   const showAuth = (message = ""): void => {
@@ -1316,11 +1360,13 @@ async function openModal(): Promise<void> {
     showView("auth-view");
     authError.hidden = !message;
     authError.textContent = message;
-    rememberToken.checked = state.auth?.remembered ?? false;
     cancelAuth.hidden = !state.hasLoaded;
     removeToken.hidden = !(state.auth?.hasToken ?? false);
-    tokenInput.value = "";
-    queueMicrotask(() => tokenInput.focus());
+    const frameUrl = new URL(tokenPageUrl);
+    frameUrl.searchParams.set("theme", state.themeMode);
+    frameUrl.searchParams.set("accent", state.accent);
+    tokenFrame.src = frameUrl.href;
+    queueMicrotask(() => tokenFrame.focus());
   };
 
   const renderTable = (): void => {
@@ -1330,9 +1376,17 @@ async function openModal(): Promise<void> {
     tableBody.replaceChildren();
 
     for (const group of groups) {
+      const groupRow = document.createElement("div");
+      groupRow.className = "group-row";
+      groupRow.setAttribute("role", "row");
+      const groupHeader = document.createElement("div");
+      groupHeader.className = "group-header";
+      groupHeader.setAttribute("role", "rowheader");
+      groupHeader.setAttribute("aria-colspan", "6");
       const groupButton = document.createElement("button");
-      groupButton.className = "group-row";
+      groupButton.className = "group-button";
       groupButton.type = "button";
+      groupButton.dataset.groupKey = group.key;
       const isCollapsed = state.collapsedGroups.has(group.key);
       groupButton.setAttribute("aria-expanded", String(!isCollapsed));
 
@@ -1353,8 +1407,15 @@ async function openModal(): Promise<void> {
           state.collapsedGroups.add(group.key);
         }
         renderTable();
+        queueMicrotask(() => {
+          [...shadow.querySelectorAll<HTMLButtonElement>("[data-group-key]")]
+            .find((button) => button.dataset.groupKey === group.key)
+            ?.focus();
+        });
       });
-      tableBody.append(groupButton);
+      groupHeader.append(groupButton);
+      groupRow.append(groupHeader);
+      tableBody.append(groupRow);
 
       if (isCollapsed) continue;
 
@@ -1365,6 +1426,7 @@ async function openModal(): Promise<void> {
 
         const projectCell = document.createElement("div");
         projectCell.className = "project-cell";
+        projectCell.setAttribute("role", "cell");
         const projectLine = document.createElement("div");
         projectLine.className = "project-line";
         const projectLink = document.createElement("a");
@@ -1384,6 +1446,7 @@ async function openModal(): Promise<void> {
         projectCell.append(projectLine, description);
 
         const maintenanceCell = document.createElement("div");
+        maintenanceCell.setAttribute("role", "cell");
         const status = getMaintenanceStatus(
           row.metadata?.lastCommitAt ?? null,
           row.metadata?.isArchived ?? false,
@@ -1396,6 +1459,7 @@ async function openModal(): Promise<void> {
 
         const popularityCell = document.createElement("div");
         popularityCell.className = "number popularity-cell";
+        popularityCell.setAttribute("role", "cell");
         if (row.metadata) {
           const stars = document.createElement("div");
           const star = document.createElement("span");
@@ -1412,6 +1476,7 @@ async function openModal(): Promise<void> {
 
         const commitCell = document.createElement("div");
         commitCell.className = "date";
+        commitCell.setAttribute("role", "cell");
         if (row.metadata?.lastCommitAt) {
           const time = document.createElement("time");
           time.dateTime = row.metadata.lastCommitAt;
@@ -1428,6 +1493,7 @@ async function openModal(): Promise<void> {
 
         const issuesCell = document.createElement("div");
         issuesCell.className = "number";
+        issuesCell.setAttribute("role", "cell");
         if (row.metadata) {
           issuesCell.textContent = formatRepositoryCount(row.metadata.openIssues);
         } else {
@@ -1436,7 +1502,8 @@ async function openModal(): Promise<void> {
 
         const licenseCell = document.createElement("div");
         licenseCell.className = "license";
-        licenseCell.textContent = row.metadata?.license ?? "No license";
+        licenseCell.setAttribute("role", "cell");
+        licenseCell.textContent = getProjectLicenseLabel(row.metadata);
 
         projectRow.append(
           projectCell,
@@ -1453,7 +1520,12 @@ async function openModal(): Promise<void> {
     if (groups.length === 0) {
       const empty = document.createElement("div");
       empty.className = "empty-row";
-      empty.textContent = "No projects match these filters.";
+      empty.setAttribute("role", "row");
+      const emptyCell = document.createElement("span");
+      emptyCell.setAttribute("role", "cell");
+      emptyCell.setAttribute("aria-colspan", "6");
+      emptyCell.textContent = "No projects match these filters.";
+      empty.append(emptyCell);
       tableBody.append(empty);
     }
 
@@ -1476,6 +1548,7 @@ async function openModal(): Promise<void> {
       });
 
     const createFilterOption = (
+      filter: "maintenance" | "license",
       name: string,
       optionCount: number,
       selected: boolean,
@@ -1484,6 +1557,8 @@ async function openModal(): Promise<void> {
       const button = document.createElement("button");
       button.className = "filter-option";
       button.type = "button";
+      button.dataset.filter = filter;
+      button.dataset.filterValue = name;
       button.setAttribute("role", "checkbox");
       button.setAttribute("aria-checked", String(selected));
       const box = document.createElement("span");
@@ -1496,7 +1571,18 @@ async function openModal(): Promise<void> {
       optionCountElement.className = "filter-count";
       optionCountElement.textContent = String(optionCount);
       button.append(box, optionName, optionCountElement);
-      button.addEventListener("click", onToggle);
+      button.addEventListener("click", () => {
+        onToggle();
+        queueMicrotask(() => {
+          [...shadow.querySelectorAll<HTMLButtonElement>("[data-filter-value]")]
+            .find(
+              (option) =>
+                option.dataset.filter === filter &&
+                option.dataset.filterValue === name,
+            )
+            ?.focus();
+        });
+      });
       return button;
     };
 
@@ -1518,6 +1604,7 @@ async function openModal(): Promise<void> {
       .forEach((status) => {
         maintenanceFilterOptions.append(
           createFilterOption(
+            "maintenance",
             statusLabel(status),
             facets.maintenance[status],
             selectedMaintenance.includes(status),
@@ -1544,6 +1631,7 @@ async function openModal(): Promise<void> {
       .forEach(([license, optionCount]) => {
         licenseFilterOptions.append(
           createFilterOption(
+            "license",
             license,
             optionCount,
             selectedLicenses.includes(license),
@@ -1717,6 +1805,60 @@ async function openModal(): Promise<void> {
     }
   };
 
+  tokenMessageHandler = (event: MessageEvent): void => {
+    if (
+      event.source !== tokenFrame.contentWindow ||
+      event.origin !== tokenPageOrigin
+    ) {
+      return;
+    }
+    const data = event.data as {
+      type?: unknown;
+      auth?: Partial<AuthStatus> | null;
+      key?: unknown;
+      direction?: unknown;
+    };
+
+    if (data?.type === "awesomer.auth.key") {
+      if (data.key === "Escape") {
+        close();
+        return;
+      }
+
+      if (
+        data.key === "Tab" &&
+        (data.direction === "forward" || data.direction === "backward")
+      ) {
+        const focusable = getFocusableElements(dialog);
+        const frameIndex = focusable.indexOf(tokenFrame);
+        const targetIndex =
+          data.direction === "forward" ? frameIndex + 1 : frameIndex - 1;
+        (focusable[targetIndex] ??
+          (data.direction === "forward" ? focusable[0] : focusable.at(-1)))?.focus();
+      }
+      return;
+    }
+
+    if (
+      data?.type !== "awesomer.auth.saved" ||
+      !data.auth ||
+      data.auth.hasToken !== true ||
+      typeof data.auth.remembered !== "boolean" ||
+      !(typeof data.auth.login === "string" || data.auth.login === null)
+    ) {
+      return;
+    }
+
+    state.auth = {
+      hasToken: true,
+      remembered: data.auth.remembered,
+      login: data.auth.login,
+    };
+    authError.hidden = true;
+    void loadData(false);
+  };
+  window.addEventListener("message", tokenMessageHandler);
+
   requiredElement<HTMLButtonElement>(shadow, "#close-button").addEventListener(
     "click",
     close,
@@ -1756,66 +1898,19 @@ async function openModal(): Promise<void> {
     () => void loadData(true),
   );
 
-  requiredElement<HTMLFormElement>(shadow, "#auth-form").addEventListener(
-    "submit",
-    async (event) => {
-      event.preventDefault();
-      authError.hidden = true;
-      saveToken.disabled = true;
-
-      try {
-        state.auth = await sendRequest<AuthStatus>({
-          type: "auth.save",
-          token: tokenInput.value,
-          remember: rememberToken.checked,
-        });
-        tokenInput.value = "";
-        await loadData(false);
-      } catch (error) {
-        authError.textContent =
-          error instanceof Error ? error.message : "Could not save this token.";
-        authError.hidden = false;
-      } finally {
-        saveToken.disabled = false;
-      }
-    },
-  );
-
   cancelAuth.addEventListener("click", showMain);
   removeToken.addEventListener("click", async () => {
     state.auth = await sendRequest<AuthStatus>({ type: "auth.clear" });
     showAuth("The GitHub token was removed.");
   });
 
-  requiredElement<HTMLFormElement>(shadow, "#settings-auth-form").addEventListener(
-    "submit",
-    async (event) => {
-      event.preventDefault();
-      settingsAuthError.hidden = true;
-
-      if (!settingsTokenInput.value.trim()) {
-        settingsAuthError.textContent = "Paste a replacement token first.";
-        settingsAuthError.hidden = false;
-        return;
-      }
-
-      try {
-        state.auth = await sendRequest<AuthStatus>({
-          type: "auth.save",
-          token: settingsTokenInput.value,
-          remember: settingsRememberToken.checked,
-        });
-        settingsLogin.textContent = state.auth.login ?? "GitHub user";
-        settingsTokenInput.value = "";
-        setSettingsOpen(false);
-        await loadData(false);
-      } catch (error) {
-        settingsAuthError.textContent =
-          error instanceof Error ? error.message : "Could not save this token.";
-        settingsAuthError.hidden = false;
-      }
-    },
-  );
+  requiredElement<HTMLButtonElement>(
+    shadow,
+    "#settings-replace-token",
+  ).addEventListener("click", () => {
+    setSettingsOpen(false);
+    showAuth();
+  });
   requiredElement<HTMLButtonElement>(
     shadow,
     "#settings-disconnect",
@@ -1827,6 +1922,18 @@ async function openModal(): Promise<void> {
   shadow.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+    const clickedFilter = event
+      .composedPath()
+      .some(
+        (node) =>
+          node instanceof Element &&
+          (node.matches(".filter-panel") || node.matches(".filter-button")),
+      );
+
+    if (state.openFilter && !clickedFilter) {
+      state.openFilter = null;
+      renderTable();
+    }
 
     const themeButton = target.closest<HTMLButtonElement>("[data-theme-mode]");
     if (themeButton) {
@@ -1886,6 +1993,13 @@ async function openModal(): Promise<void> {
     state.openFilter =
       state.openFilter === "maintenance" ? null : "maintenance";
     renderTable();
+    if (state.openFilter === "maintenance") {
+      queueMicrotask(() =>
+        maintenanceFilterOptions
+          .querySelector<HTMLButtonElement>(".filter-option")
+          ?.focus(),
+      );
+    }
   });
   requiredElement<HTMLButtonElement>(
     shadow,
@@ -1893,6 +2007,13 @@ async function openModal(): Promise<void> {
   ).addEventListener("click", () => {
     state.openFilter = state.openFilter === "license" ? null : "license";
     renderTable();
+    if (state.openFilter === "license") {
+      queueMicrotask(() =>
+        licenseFilterOptions
+          .querySelector<HTMLButtonElement>(".filter-option")
+          ?.focus(),
+      );
+    }
   });
   shadow
     .querySelectorAll<HTMLButtonElement>("[data-clear-filter]")
@@ -1940,13 +2061,42 @@ async function openModal(): Promise<void> {
   });
 
   const handleKeydown = (event: Event): void => {
-    if (!(event instanceof KeyboardEvent) || event.key !== "Escape") return;
+    if (!(event instanceof KeyboardEvent)) return;
+
+    if (event.key === "Tab") {
+      const focusScope: ParentNode = state.settingsOpen ? settingsPanel : dialog;
+      const focusable = getFocusableElements(focusScope);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      const active = shadow.activeElement;
+
+      if (
+        first &&
+        last &&
+        event.shiftKey &&
+        (active === first || active === dialog)
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (first && last && !event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+
+    if (event.key !== "Escape") return;
 
     if (state.settingsOpen) {
       setSettingsOpen(false);
     } else if (state.openFilter) {
+      const filterButton = requiredElement<HTMLButtonElement>(
+        shadow,
+        `#${state.openFilter}-filter-button`,
+      );
       state.openFilter = null;
       renderTable();
+      filterButton.focus();
     } else {
       close();
     }

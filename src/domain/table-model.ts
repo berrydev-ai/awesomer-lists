@@ -12,6 +12,16 @@ import type {
 
 const DAY_IN_MILLISECONDS = 86_400_000;
 
+/**
+ * Distinguishes a confirmed license-less repository from unavailable metadata.
+ */
+export function getProjectLicenseLabel(
+  metadata: RepositoryMetadata | null,
+): string {
+  if (!metadata) return "Unavailable";
+  return metadata.license ?? "No license";
+}
+
 function compareNullable(
   left: number | string | null,
   right: number | string | null,
@@ -46,7 +56,9 @@ function sortValue(
     ];
   }
   if (field === "lastCommitAt") return row.metadata?.lastCommitAt ?? null;
-  if (field === "license") return row.metadata?.license?.toLocaleLowerCase() ?? null;
+  if (field === "license") {
+    return getProjectLicenseLabel(row.metadata).toLocaleLowerCase();
+  }
   return row.metadata?.[field] ?? null;
 }
 
@@ -102,7 +114,7 @@ function matchesMaintenance(row: ProjectRow, options: TableOptions): boolean {
 
 function matchesLicense(row: ProjectRow, options: TableOptions): boolean {
   if (!options.licenses?.length) return true;
-  return options.licenses.includes(row.metadata?.license ?? "No license");
+  return options.licenses.includes(getProjectLicenseLabel(row.metadata));
 }
 
 function createRows(
@@ -186,7 +198,8 @@ export function buildTableFacets(
     unknown: 0,
   };
 
-  rows.filter((row) => matchesLicense(row, options)).forEach((row) => {
+  const maintenanceRows = rows.filter((row) => matchesLicense(row, options));
+  maintenanceRows.forEach((row) => {
     const status = getMaintenanceStatus(
       row.metadata?.lastCommitAt ?? null,
       row.metadata?.isArchived ?? false,
@@ -197,12 +210,12 @@ export function buildTableFacets(
 
   const licenseCounts = new Map<string, number>();
   rows.filter((row) => matchesMaintenance(row, options)).forEach((row) => {
-    const license = row.metadata?.license ?? "No license";
+    const license = getProjectLicenseLabel(row.metadata);
     licenseCounts.set(license, (licenseCounts.get(license) ?? 0) + 1);
   });
 
   return {
-    total: rows.length,
+    total: maintenanceRows.length,
     maintenance,
     licenses: [...licenseCounts.entries()]
       .map(([value, count]) => ({ value, count }))
