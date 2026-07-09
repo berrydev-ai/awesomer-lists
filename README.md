@@ -1,0 +1,72 @@
+# Awesomer Lists
+
+Awesomer Lists is a Chrome extension for turning a GitHub Awesome list into a sortable, grouped project table.
+
+## What it shows
+
+- Stars and forks
+- Latest commit on the default branch
+- Open issues, excluding pull requests
+- License and archived state
+- A plain maintenance label: Active, Quiet, Stale, or Archived
+- The same section hierarchy used by the source README
+
+Search and filters work across project names, descriptions, repository names, and README sections. Sorting happens inside each section, so the list keeps its original structure.
+
+## Install locally
+
+1. Run `npm install`.
+2. Run `npm run build`.
+3. Open `chrome://extensions` in Chrome.
+4. Turn on **Developer mode**.
+5. Choose **Load unpacked** and select the `dist` folder.
+6. Pin **Awesomer Lists** from Chrome's Extensions menu.
+
+## Use it
+
+1. Open a GitHub repository containing an Awesome-style README.
+2. Click the **Awesomer Lists** toolbar button.
+3. Add a dedicated GitHub token when prompted.
+4. Search, filter, collapse sections, or sort a column.
+
+The extension reads the repository's preferred README through GitHub's API. It recognizes GitHub repository links in Markdown bullet items and groups them by their nearest headings.
+
+## Create the GitHub token
+
+Use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) created only for this extension.
+
+Recommended settings:
+
+- Give the token a short expiration date.
+- Set **Issues** to **Read-only**.
+- Leave every write permission off.
+- Do not grant private repository access unless you intentionally want to analyze private lists.
+
+Fine-grained tokens include read access to public repositories. The extension uses GraphQL batches so one request can load many projects with exact issue-only and default-branch commit data.
+
+By default, the token is kept only in Chrome's session storage and is cleared when the browser session ends. **Remember on this device** stores it in local extension storage. Local extension storage is not a password vault.
+
+## Privacy and permissions
+
+- `activeTab` gives temporary access only after you click the toolbar button.
+- `scripting` injects the modal into that active GitHub tab.
+- `storage` keeps the token choice and a six-hour metadata cache.
+- `https://api.github.com/*` allows README and metadata requests to GitHub.
+
+The token is sent only to `api.github.com`. Page code can check whether a token exists, but cannot read it back. The extension has no analytics or external service.
+
+## Maintenance labels
+
+- **Active:** latest commit was within 90 days.
+- **Quiet:** latest commit was between 91 days and one year ago.
+- **Stale:** latest commit was more than one year ago.
+- **Archived:** GitHub marks the repository as archived.
+
+These labels are visible rules, not a hidden quality score. Stars and issue counts remain separate signals.
+
+## Development
+
+- `npm test` runs behavior tests.
+- `npm run typecheck` checks TypeScript.
+- `npm run build` creates the unpacked extension in `dist`.
+- `npm run check` runs all three checks.
