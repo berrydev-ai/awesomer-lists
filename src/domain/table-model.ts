@@ -41,7 +41,7 @@ function matchesQuery(row: ProjectRow, query: string): boolean {
   return [
     row.title,
     row.description,
-    row.repository.nwo,
+    row.repository.nameWithOwner,
     row.sectionPath.join(" "),
     row.metadata?.description ?? "",
   ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
@@ -77,7 +77,7 @@ export function buildTableGroups(
   options: TableOptions,
 ): TableGroup[] {
   const metadataByRepository = new Map(
-    metadata.map((item) => [item.nwo.toLowerCase(), item]),
+    metadata.map((item) => [item.nameWithOwner.toLowerCase(), item]),
   );
   const groups = new Map<string, TableGroup>();
 
@@ -85,7 +85,7 @@ export function buildTableGroups(
     const row: ProjectRow = {
       ...entry,
       metadata:
-        metadataByRepository.get(entry.repository.nwo.toLowerCase()) ?? null,
+        metadataByRepository.get(entry.repository.nameWithOwner.toLowerCase()) ?? null,
     };
 
     if (

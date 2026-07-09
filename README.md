@@ -29,7 +29,7 @@ Search and filters work across project names, descriptions, repository names, an
 3. Add a dedicated GitHub token when prompted.
 4. Search, filter, collapse sections, or sort a column.
 
-The extension reads the repository's preferred README through GitHub's API. It recognizes GitHub repository links in Markdown bullet items and groups them by their nearest headings.
+At a repository root, the extension reads the preferred README through GitHub's API. On a rendered Markdown file page, it reads that exact file's raw source. It recognizes GitHub repository links in Markdown list items and groups them by their nearest headings.
 
 ## Create the GitHub token
 
@@ -38,6 +38,7 @@ Use a [fine-grained personal access token](https://github.com/settings/personal-
 Recommended settings:
 
 - Give the token a short expiration date.
+- Set **Contents** to **Read-only**.
 - Set **Issues** to **Read-only**.
 - Leave every write permission off.
 - Do not grant private repository access unless you intentionally want to analyze private lists.
@@ -52,8 +53,11 @@ By default, the token is kept only in Chrome's session storage and is cleared wh
 - `scripting` injects the modal into that active GitHub tab.
 - `storage` keeps the token choice and a six-hour metadata cache.
 - `https://api.github.com/*` allows README and metadata requests to GitHub.
+- `https://raw.githubusercontent.com/*` allows the current rendered Markdown file to be read without sending the token to that host.
 
 The token is sent only to `api.github.com`. Page code can check whether a token exists, but cannot read it back. The extension has no analytics or external service.
+
+The extension accepts up to 5,000 unique GitHub repositories from one source file. The cap prevents a compromised page from creating an unbounded API workload.
 
 ## Maintenance labels
 

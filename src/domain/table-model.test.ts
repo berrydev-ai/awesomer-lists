@@ -28,7 +28,7 @@ describe("buildTableGroups", () => {
       "Frameworks",
       "Resources",
     ]);
-    expect(groups[0]?.rows.map((row) => row.repository.nwo)).toEqual([
+    expect(groups[0]?.rows.map((row) => row.repository.nameWithOwner)).toEqual([
       "facebook/react",
       "vitejs/vite",
     ]);
@@ -50,7 +50,7 @@ describe("buildTableGroups", () => {
     });
 
     expect(groups.flatMap((group) => group.rows)).toHaveLength(1);
-    expect(groups[0]?.rows[0]?.repository.nwo).toBe("vitejs/vite");
+    expect(groups[0]?.rows[0]?.repository.nameWithOwner).toBe("vitejs/vite");
   });
 
   it("filters out archived projects and projects older than the freshness limit", () => {
@@ -76,29 +76,29 @@ describe("buildTableGroups", () => {
       now: new Date("2026-07-09T12:00:00Z"),
     });
 
-    expect(groups[0]?.rows.map((row) => row.repository.nwo)).toEqual([
+    expect(groups[0]?.rows.map((row) => row.repository.nameWithOwner)).toEqual([
       "vitejs/vite",
     ]);
   });
 });
 
-function createEntry(nwo: string, sectionPath: string[]): AwesomeEntry {
-  const [owner = "", name = ""] = nwo.split("/");
-  const url = `https://github.com/${nwo}`;
+function createEntry(nameWithOwner: string, sectionPath: string[]): AwesomeEntry {
+  const [owner = "", name = ""] = nameWithOwner.split("/");
+  const url = `https://github.com/${nameWithOwner}`;
 
   return {
     title: name,
     description: `${name} project`,
-    repository: { owner, name, nwo, url },
+    repository: { owner, name, nameWithOwner, url },
     sectionPath,
     sourceUrl: url,
   };
 }
 
-function createMetadata(nwo: string, stars: number): RepositoryMetadata {
+function createMetadata(nameWithOwner: string, stars: number): RepositoryMetadata {
   return {
-    nwo,
-    url: `https://github.com/${nwo}`,
+    nameWithOwner,
+    url: `https://github.com/${nameWithOwner}`,
     description: null,
     stars,
     forks: 0,

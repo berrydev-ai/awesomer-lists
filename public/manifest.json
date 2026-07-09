@@ -5,7 +5,10 @@
   "description": "Sort Awesome list projects by stars, maintenance, commits, issues, and license.",
   "minimum_chrome_version": "114",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://api.github.com/*"],
+  "host_permissions": [
+    "https://api.github.com/*",
+    "https://raw.githubusercontent.com/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"

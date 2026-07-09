@@ -1,4 +1,6 @@
 import type { RepositoryMetadata, RepositoryRef } from "./domain/types";
+import { normalizeGitHubRawUrl } from "./domain/github-source";
+import { normalizeRepositoryNames } from "./background-logic";
 import {
   fetchRepositoryMetadataBatch,
   fetchRepositoryReadme,
@@ -8,7 +10,6 @@ import {
 import type { RateLimitInfo } from "./github/graphql";
 import type {
   AuthStatus,
-  ExtensionRequest,
   ExtensionResponse,
   MetadataLoadResult,
 } from "./messages";
@@ -19,17 +20,22 @@ const LOGIN_KEY = "auth.githubLogin";
 const CACHE_PREFIX = "metadata.";
 const CACHE_TTL_MILLISECONDS = 6 * 60 * 60 * 1_000;
 const BATCH_SIZE = 20;
-const MAX_REPOSITORIES = 1_000;
-const REPOSITORY_PATTERN = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
+const MAX_REPOSITORIES = 5_000;
 
 interface CachedMetadata {
   value: RepositoryMetadata;
   expiresAt: number;
 }
 
-// Only the service worker needs direct storage access; the page-facing script uses narrow messages.
-void chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
-void chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+interface RequestMessage extends Record<string, unknown> {
+  type: string;
+}
+
+// Only the service worker needs direct storage access; requests wait until that boundary is active.
+const storageReady = Promise.all([
+  chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }),
+  chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }),
+]);
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id) return;
@@ -65,36 +71,17 @@ function isAllowedSender(sender: chrome.runtime.MessageSender): boolean {
   }
 }
 
-function isExtensionRequest(value: unknown): value is ExtensionRequest {
-  if (typeof value !== "object" || value === null || !("type" in value)) {
-    return false;
-  }
-
-  return [
-    "auth.status",
-    "auth.save",
-    "auth.clear",
-    "readme.load",
-    "metadata.load",
-  ].includes(String(value.type));
-}
-
-function parseRepository(nwo: string): RepositoryRef {
-  if (!REPOSITORY_PATTERN.test(nwo)) {
-    throw new Error("Invalid repository name.");
-  }
-
-  const [owner = "", name = ""] = nwo.split("/");
-
-  return {
-    owner,
-    name,
-    nwo: `${owner}/${name}`,
-    url: `https://github.com/${owner}/${name}`,
-  };
+function isRequestMessage(value: unknown): value is RequestMessage {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    typeof value.type === "string"
+  );
 }
 
 async function getToken(): Promise<string | null> {
+  await storageReady;
   const session = await chrome.storage.session.get(SESSION_TOKEN_KEY);
 
   if (typeof session[SESSION_TOKEN_KEY] === "string") {
@@ -108,6 +95,7 @@ async function getToken(): Promise<string | null> {
 }
 
 async function getAuthStatus(): Promise<AuthStatus> {
+  await storageReady;
   const [token, local, login] = await Promise.all([
     getToken(),
     chrome.storage.local.get(LOCAL_TOKEN_KEY),
@@ -122,6 +110,7 @@ async function getAuthStatus(): Promise<AuthStatus> {
 }
 
 async function saveToken(token: string, remember: boolean): Promise<AuthStatus> {
+  await storageReady;
   const trimmedToken = token.trim();
 
   if (trimmedToken.length < 20 || trimmedToken.length > 255) {
@@ -146,6 +135,7 @@ async function saveToken(token: string, remember: boolean): Promise<AuthStatus> 
 }
 
 async function clearToken(): Promise<AuthStatus> {
+  await storageReady;
   await Promise.all([
     chrome.storage.session.remove(SESSION_TOKEN_KEY),
     chrome.storage.local.remove([LOCAL_TOKEN_KEY, LOGIN_KEY]),
@@ -153,8 +143,8 @@ async function clearToken(): Promise<AuthStatus> {
   return getAuthStatus();
 }
 
-function cacheKey(nwo: string): string {
-  return `${CACHE_PREFIX}${nwo.toLowerCase()}`;
+function cacheKey(nameWithOwner: string): string {
+  return `${CACHE_PREFIX}${nameWithOwner.toLowerCase()}`;
 }
 
 function isCachedMetadata(value: unknown): value is CachedMetadata {
@@ -166,24 +156,25 @@ function isCachedMetadata(value: unknown): value is CachedMetadata {
     "value" in value &&
     typeof value.value === "object" &&
     value.value !== null &&
-    "nwo" in value.value &&
-    typeof value.value.nwo === "string"
+    "nameWithOwner" in value.value &&
+    typeof value.value.nameWithOwner === "string"
   );
 }
 
 async function readCachedMetadata(
   repositories: readonly RepositoryRef[],
 ): Promise<Map<string, RepositoryMetadata>> {
-  const keys = repositories.map((repository) => cacheKey(repository.nwo));
+  await storageReady;
+  const keys = repositories.map((repository) => cacheKey(repository.nameWithOwner));
   const stored = await chrome.storage.local.get(keys);
   const now = Date.now();
   const metadata = new Map<string, RepositoryMetadata>();
 
   for (const repository of repositories) {
-    const cached = stored[cacheKey(repository.nwo)];
+    const cached = stored[cacheKey(repository.nameWithOwner)];
 
     if (isCachedMetadata(cached) && cached.expiresAt > now) {
-      metadata.set(repository.nwo.toLowerCase(), cached.value);
+      metadata.set(repository.nameWithOwner.toLowerCase(), cached.value);
     }
   }
 
@@ -193,10 +184,11 @@ async function readCachedMetadata(
 async function writeCachedMetadata(
   metadata: readonly RepositoryMetadata[],
 ): Promise<void> {
+  await storageReady;
   const expiresAt = Date.now() + CACHE_TTL_MILLISECONDS;
   const values = Object.fromEntries(
     metadata.map((item) => [
-      cacheKey(item.nwo),
+      cacheKey(item.nameWithOwner),
       { value: item, expiresAt } satisfies CachedMetadata,
     ]),
   );
@@ -204,27 +196,6 @@ async function writeCachedMetadata(
   if (metadata.length > 0) {
     await chrome.storage.local.set(values);
   }
-}
-
-function uniqueRepositories(values: readonly string[]): RepositoryRef[] {
-  if (values.length > MAX_REPOSITORIES) {
-    throw new Error(`Awesome lists are limited to ${MAX_REPOSITORIES} projects.`);
-  }
-
-  const seen = new Set<string>();
-  const repositories: RepositoryRef[] = [];
-
-  for (const value of values) {
-    const repository = parseRepository(value);
-    const key = repository.nwo.toLowerCase();
-
-    if (!seen.has(key)) {
-      seen.add(key);
-      repositories.push(repository);
-    }
-  }
-
-  return repositories;
 }
 
 async function loadMetadata(
@@ -240,12 +211,12 @@ async function loadMetadata(
     );
   }
 
-  const repositories = uniqueRepositories(values);
+  const repositories = normalizeRepositoryNames(values, MAX_REPOSITORIES);
   const cached = refresh
     ? new Map<string, RepositoryMetadata>()
     : await readCachedMetadata(repositories);
   const toFetch = repositories.filter(
-    (repository) => !cached.has(repository.nwo.toLowerCase()),
+    (repository) => !cached.has(repository.nameWithOwner.toLowerCase()),
   );
   const loaded: RepositoryMetadata[] = [];
   const missing: string[] = [];
@@ -263,12 +234,12 @@ async function loadMetadata(
 
   const byRepository = new Map<string, RepositoryMetadata>([
     ...cached.entries(),
-    ...loaded.map((item) => [item.nwo.toLowerCase(), item] as const),
+    ...loaded.map((item) => [item.nameWithOwner.toLowerCase(), item] as const),
   ]);
 
   return {
     metadata: repositories.flatMap((repository) => {
-      const item = byRepository.get(repository.nwo.toLowerCase());
+      const item = byRepository.get(repository.nameWithOwner.toLowerCase());
       return item ? [item] : [];
     }),
     missing,
@@ -277,7 +248,7 @@ async function loadMetadata(
   };
 }
 
-async function handleRequest(request: ExtensionRequest): Promise<unknown> {
+async function handleRequest(request: RequestMessage): Promise<unknown> {
   if (request.type === "auth.status") return getAuthStatus();
   if (request.type === "auth.clear") return clearToken();
 
@@ -289,8 +260,24 @@ async function handleRequest(request: ExtensionRequest): Promise<unknown> {
   }
 
   if (request.type === "readme.load") {
-    if (typeof request.repository !== "string") {
+    if (
+      typeof request.repository !== "string" ||
+      (request.sourceUrl !== null && typeof request.sourceUrl !== "string")
+    ) {
       throw new Error("Invalid repository name.");
+    }
+
+    const repository = normalizeRepositoryNames([request.repository], 1)[0];
+
+    if (!repository) {
+      throw new Error("Invalid repository name.");
+    }
+    const sourceUrl = request.sourceUrl
+      ? normalizeGitHubRawUrl(request.sourceUrl, repository)
+      : null;
+
+    if (request.sourceUrl && !sourceUrl) {
+      throw new Error("The raw source does not belong to this repository.");
     }
 
     const token = await getToken();
@@ -300,7 +287,11 @@ async function handleRequest(request: ExtensionRequest): Promise<unknown> {
         { code: "AUTH_REQUIRED" },
       );
     }
-    return fetchRepositoryReadme(parseRepository(request.repository), token);
+    return fetchRepositoryReadme(repository, token, { sourceUrl });
+  }
+
+  if (request.type !== "metadata.load") {
+    throw new Error("Unknown extension request.");
   }
 
   if (
@@ -315,7 +306,7 @@ async function handleRequest(request: ExtensionRequest): Promise<unknown> {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!isAllowedSender(sender) || !isExtensionRequest(message)) {
+  if (!isAllowedSender(sender) || !isRequestMessage(message)) {
     return false;
   }
 

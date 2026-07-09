@@ -20,7 +20,7 @@ describe("parseAwesomeList", () => {
         repository: {
           owner: "mastra-ai",
           name: "mastra",
-          nwo: "mastra-ai/mastra",
+          nameWithOwner: "mastra-ai/mastra",
           url: "https://github.com/mastra-ai/mastra",
         },
         sectionPath: ["Frameworks", "TypeScript"],
@@ -42,7 +42,7 @@ describe("parseAwesomeList", () => {
     expect(parseAwesomeList(markdown)[0]).toMatchObject({
       title: "LangChain",
       description: "Build context-aware applications.",
-      repository: { nwo: "langchain-ai/langchain" },
+      repository: { nameWithOwner: "langchain-ai/langchain" },
       sectionPath: ["Frameworks"],
     });
   });
@@ -75,7 +75,52 @@ describe("parseAwesomeList", () => {
 `;
 
     expect(
-      parseAwesomeList(markdown).map((entry) => entry.repository.nwo),
+      parseAwesomeList(markdown).map((entry) => entry.repository.nameWithOwner),
     ).toEqual(["mastra-ai/mastra"]);
+  });
+
+  it("keeps the project title when its GitHub repository is a later source link", () => {
+    const markdown = `# Awesome Agents
+
+## Frameworks
+
+- [Mastra](https://mastra.ai) - Build AI applications. ([Source](https://github.com/mastra-ai/mastra))
+`;
+
+    expect(parseAwesomeList(markdown)[0]).toMatchObject({
+      title: "Mastra",
+      description: "Build AI applications. (Source)",
+      repository: { nameWithOwner: "mastra-ai/mastra" },
+    });
+  });
+
+  it("recognizes numbered items containing HTML repository links", () => {
+    const markdown = `# Awesome Agents
+
+## Frameworks
+
+1. <a href="https://github.com/mastra-ai/mastra">Mastra</a> - Build AI applications.
+`;
+
+    expect(parseAwesomeList(markdown)[0]).toMatchObject({
+      title: "Mastra",
+      description: "Build AI applications.",
+      repository: { nameWithOwner: "mastra-ai/mastra" },
+      sectionPath: ["Frameworks"],
+    });
+  });
+
+  it("keeps an indented continuation as part of the project description", () => {
+    const markdown = `# Awesome Agents
+
+## Swarms
+
+- [AgentsMesh](https://github.com/AgentsMesh/AgentsMesh) - Coordinate remote agent workstations.
+  Supports multiple coding-agent runtimes.
+`;
+
+    expect(parseAwesomeList(markdown)[0]?.description).toBe(
+      "Coordinate remote agent workstations. Supports multiple coding-agent runtimes.",
+    );
   });
 });

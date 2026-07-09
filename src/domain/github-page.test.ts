@@ -14,5 +14,6 @@ describe("parseGitHubRepositoryPage", () => {
       null,
     );
     expect(parseGitHubRepositoryPage("https://example.com/org/repo")).toBe(null);
+    expect(parseGitHubRepositoryPage("not a URL")).toBe(null);
   });
 });

@@ -18,6 +18,11 @@ export interface GitHubClientError extends Error {
   code: GitHubErrorCode;
 }
 
+export interface ReadmeRequestOptions {
+  sourceUrl: string | null;
+  fetchImplementation?: typeof fetch;
+}
+
 function createClientError(
   code: GitHubErrorCode,
   message: string,
@@ -143,8 +148,18 @@ export async function validateGitHubToken(
 export async function fetchRepositoryReadme(
   repository: RepositoryRef,
   token: string,
-  fetchImplementation: typeof fetch = fetch,
+  options: ReadmeRequestOptions,
 ): Promise<string> {
+  const fetchImplementation = options.fetchImplementation ?? fetch;
+
+  if (options.sourceUrl) {
+    const response = await fetchImplementation(options.sourceUrl, {
+      headers: { Accept: "text/plain" },
+    });
+    await assertSuccessfulResponse(response);
+    return response.text();
+  }
+
   const endpoint = `https://api.github.com/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/readme`;
   const response = await fetchImplementation(endpoint, {
     headers: {

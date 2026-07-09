@@ -30,7 +30,13 @@ export interface GitHubRepositoryPage {
 export function parseGitHubRepositoryPage(
   pageUrl: string,
 ): GitHubRepositoryPage | null {
-  const url = new URL(pageUrl);
+  let url: URL;
+
+  try {
+    url = new URL(pageUrl);
+  } catch {
+    return null;
+  }
 
   if (url.hostname !== "github.com" && url.hostname !== "www.github.com") {
     return null;

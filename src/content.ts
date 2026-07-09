@@ -1,4 +1,5 @@
 import { parseGitHubRepositoryPage } from "./domain/github-page";
+import { normalizeGitHubRawUrl } from "./domain/github-source";
 import { getMaintenanceStatus } from "./domain/maintenance";
 import { parseAwesomeList } from "./domain/awesome-list";
 import { buildTableGroups } from "./domain/table-model";
@@ -16,6 +17,7 @@ import type {
   ExtensionResponse,
   MetadataLoadResult,
 } from "./messages";
+import { formatRepositoryCount } from "./ui/format";
 
 const ROOT_ID = "awesomer-lists-extension-root";
 
@@ -440,16 +442,32 @@ function createRepositoryRef(owner: string, name: string): RepositoryRef {
   return {
     owner,
     name,
-    nwo: `${owner}/${name}`,
+    nameWithOwner: `${owner}/${name}`,
     url: `https://github.com/${owner}/${name}`,
   };
 }
 
-function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    notation: value >= 10_000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(value);
+function findCurrentRawSource(
+  repository: NonNullable<ReturnType<typeof parseGitHubRepositoryPage>>,
+): string | null {
+  if (!location.pathname.includes("/blob/")) return null;
+
+  const selectors = [
+    'a[data-testid="raw-button"]',
+    'a[data-hotkey="r"]',
+    'a[aria-label*="raw" i][href]',
+  ];
+
+  for (const selector of selectors) {
+    const candidate = document.querySelector<HTMLAnchorElement>(selector)?.href;
+    const sourceUrl = candidate
+      ? normalizeGitHubRawUrl(candidate, repository)
+      : null;
+
+    if (sourceUrl) return sourceUrl;
+  }
+
+  return null;
 }
 
 function formatCalendarDate(value: string): string {
@@ -491,6 +509,7 @@ function appendEmptyValue(cell: HTMLTableCellElement): void {
 
 async function openModal(): Promise<void> {
   const page = parseGitHubRepositoryPage(location.href);
+  const currentRawSource = page ? findCurrentRawSource(page) : null;
   const host = document.createElement("div");
   host.id = ROOT_ID;
   document.documentElement.append(host);
@@ -736,7 +755,7 @@ async function openModal(): Promise<void> {
         projectLink.textContent = row.title;
         const repositoryName = document.createElement("span");
         repositoryName.className = "repository-name";
-        repositoryName.textContent = row.repository.nwo;
+        repositoryName.textContent = row.repository.nameWithOwner;
         const description = document.createElement("span");
         description.className = "description";
         description.textContent =
@@ -757,10 +776,10 @@ async function openModal(): Promise<void> {
         const popularityCell = document.createElement("td");
         popularityCell.className = "number";
         if (row.metadata) {
-          popularityCell.textContent = `★ ${formatCompactNumber(row.metadata.stars)}`;
+          popularityCell.textContent = `★ ${formatRepositoryCount(row.metadata.stars)}`;
           const forks = document.createElement("span");
           forks.className = "sub-number";
-          forks.textContent = `${formatCompactNumber(row.metadata.forks)} forks`;
+          forks.textContent = `${formatRepositoryCount(row.metadata.forks)} forks`;
           popularityCell.append(forks);
         } else {
           appendEmptyValue(popularityCell);
@@ -785,7 +804,7 @@ async function openModal(): Promise<void> {
         const issuesCell = document.createElement("td");
         issuesCell.className = "number";
         if (row.metadata) {
-          issuesCell.textContent = formatCompactNumber(row.metadata.openIssues);
+          issuesCell.textContent = formatRepositoryCount(row.metadata.openIssues);
         } else {
           appendEmptyValue(issuesCell);
         }
@@ -834,7 +853,7 @@ async function openModal(): Promise<void> {
 
     if (state.rateLimit) {
       const rate = document.createElement("span");
-      rate.textContent = `${formatCompactNumber(state.rateLimit.remaining)} API points left`;
+      rate.textContent = `${formatRepositoryCount(state.rateLimit.remaining)} API points left`;
       rate.title = `Resets ${formatCalendarDate(state.rateLimit.resetAt)}`;
       footer.append(rate);
     }
@@ -881,9 +900,17 @@ async function openModal(): Promise<void> {
 
     try {
       const repository = createRepositoryRef(page.owner, page.name);
+
+      if (location.pathname.includes("/blob/") && !currentRawSource) {
+        throw new Error(
+          "GitHub did not expose the raw source for this file. Open the repository README and try again.",
+        );
+      }
+
       const markdown = await sendRequest<string>({
         type: "readme.load",
-        repository: repository.nwo,
+        repository: repository.nameWithOwner,
+        sourceUrl: currentRawSource,
       });
       state.entries = parseAwesomeList(markdown);
 
@@ -898,7 +925,7 @@ async function openModal(): Promise<void> {
         "Batching exact stars, commits, issues, licenses, and archived state.";
       const result = await sendRequest<MetadataLoadResult>({
         type: "metadata.load",
-        repositories: state.entries.map((entry) => entry.repository.nwo),
+        repositories: state.entries.map((entry) => entry.repository.nameWithOwner),
         refresh,
       });
       state.metadata = result.metadata;
@@ -1027,8 +1054,9 @@ async function openModal(): Promise<void> {
     return;
   }
 
-  sourceLink.textContent = `${page.owner}/${page.name} · README source`;
-  sourceLink.href = `https://github.com/${page.owner}/${page.name}#readme`;
+  sourceLink.textContent = `${page.owner}/${page.name} · ${currentRawSource ? "current file source" : "README source"}`;
+  sourceLink.href =
+    currentRawSource ?? `https://github.com/${page.owner}/${page.name}#readme`;
   state.auth = await sendRequest<AuthStatus>({ type: "auth.status" });
 
   if (!state.auth.hasToken) {

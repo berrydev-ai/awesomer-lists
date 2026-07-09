@@ -6,7 +6,7 @@ export type ExtensionRequest =
   | { type: "auth.status" }
   | { type: "auth.save"; token: string; remember: boolean }
   | { type: "auth.clear" }
-  | { type: "readme.load"; repository: string }
+  | { type: "readme.load"; repository: string; sourceUrl: string | null }
   | {
       type: "metadata.load";
       repositories: string[];

@@ -61,7 +61,7 @@ describe("buildRepositoryMetadataQuery", () => {
     ).toEqual({
       metadata: [
         {
-          nwo: "mastra-ai/mastra",
+          nameWithOwner: "mastra-ai/mastra",
           url: "https://github.com/mastra-ai/mastra",
           description: "Build AI applications and agents.",
           stars: 20_000,
@@ -79,13 +79,13 @@ describe("buildRepositoryMetadataQuery", () => {
   });
 });
 
-function createRepository(nwo: string): RepositoryRef {
-  const [owner = "", name = ""] = nwo.split("/");
+function createRepository(nameWithOwner: string): RepositoryRef {
+  const [owner = "", name = ""] = nameWithOwner.split("/");
 
   return {
     owner,
     name,
-    nwo,
-    url: `https://github.com/${nwo}`,
+    nameWithOwner,
+    url: `https://github.com/${nameWithOwner}`,
   };
 }

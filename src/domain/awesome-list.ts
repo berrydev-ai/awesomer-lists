@@ -1,10 +1,9 @@
 import type { AwesomeEntry, RepositoryRef } from "./types";
+import { parseGitHubRepositoryPage } from "./github-page";
 
-const GITHUB_LINK_PATTERN =
-  /\[([^\]]+)]\((https?:\/\/(?:www\.)?github\.com\/[^)\s]+)\)/i;
-const REFERENCE_LINK_PATTERN = /\[([^\]]+)]\[([^\]]+)]/;
 const REFERENCE_DEFINITION_PATTERN =
   /^\s*\[([^\]]+)]:\s*(?:<([^>]+)>|(\S+))/;
+const LIST_ITEM_PATTERN = /^\s*(?:[-*+]|\d+[.)])\s+(.+)$/;
 
 interface ExtractedLink {
   title: string;
@@ -12,31 +11,21 @@ interface ExtractedLink {
   endIndex: number;
 }
 
+interface DiscoveredLink extends ExtractedLink {
+  startIndex: number;
+}
+
 function parseRepository(url: string): RepositoryRef | null {
-  let parsed: URL;
+  const parsed = parseGitHubRepositoryPage(url);
 
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
+  if (!parsed) return null;
 
-  if (parsed.hostname !== "github.com" && parsed.hostname !== "www.github.com") {
-    return null;
-  }
-
-  const [owner, rawName] = parsed.pathname.split("/").filter(Boolean);
-
-  if (!owner || !rawName) {
-    return null;
-  }
-
-  const name = rawName.replace(/\.git$/i, "");
+  const { owner, name } = parsed;
 
   return {
     owner,
     name,
-    nwo: `${owner}/${name}`,
+    nameWithOwner: `${owner}/${name}`,
     url: `https://github.com/${owner}/${name}`,
   };
 }
@@ -68,7 +57,29 @@ function contentLines(markdown: string): string[] {
     }
   }
 
-  return lines;
+  return joinListContinuations(lines);
+}
+
+function joinListContinuations(lines: readonly string[]): string[] {
+  const joined: string[] = [];
+
+  for (const line of lines) {
+    const previousIndex = joined.length - 1;
+    const previous = joined[previousIndex];
+    const isContinuation =
+      /^\s{2,}\S/.test(line) &&
+      !LIST_ITEM_PATTERN.test(line) &&
+      previous !== undefined &&
+      LIST_ITEM_PATTERN.test(previous);
+
+    if (isContinuation) {
+      joined[previousIndex] = `${previous} ${line.trim()}`;
+    } else {
+      joined.push(line);
+    }
+  }
+
+  return joined;
 }
 
 function collectReferences(lines: readonly string[]): Map<string, string> {
@@ -92,30 +103,68 @@ function extractLink(
   listItem: string,
   references: ReadonlyMap<string, string>,
 ): ExtractedLink | null {
-  const inlineLink = GITHUB_LINK_PATTERN.exec(listItem);
+  const links: DiscoveredLink[] = [];
 
-  if (inlineLink?.[1] && inlineLink[2]) {
-    return {
-      title: inlineLink[1],
-      url: inlineLink[2],
-      endIndex: (inlineLink.index ?? 0) + inlineLink[0].length,
-    };
+  for (const match of listItem.matchAll(/\[([^\]]+)]\(([^)\s]+)\)/g)) {
+    if (match[1] && match[2] && match.index !== undefined) {
+      links.push({
+        title: match[1],
+        url: match[2],
+        startIndex: match.index,
+        endIndex: match.index + match[0].length,
+      });
+    }
   }
 
-  const referenceLink = REFERENCE_LINK_PATTERN.exec(listItem);
-  const referenceUrl = referenceLink?.[2]
-    ? references.get(referenceLink[2].toLowerCase())
-    : undefined;
+  for (const match of listItem.matchAll(/\[([^\]]+)]\[([^\]]+)]/g)) {
+    const referenceUrl = match[2]
+      ? references.get(match[2].toLowerCase())
+      : undefined;
 
-  if (!referenceLink?.[1] || !referenceUrl) {
-    return null;
+    if (match[1] && referenceUrl && match.index !== undefined) {
+      links.push({
+        title: match[1],
+        url: referenceUrl,
+        startIndex: match.index,
+        endIndex: match.index + match[0].length,
+      });
+    }
   }
+
+  for (const match of listItem.matchAll(
+    /<a\b[^>]*\bhref=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi,
+  )) {
+    if (match[2] && match[3] && match.index !== undefined) {
+      links.push({
+        title: match[3].replace(/<[^>]+>/g, "").trim(),
+        url: match[2],
+        startIndex: match.index,
+        endIndex: match.index + match[0].length,
+      });
+    }
+  }
+
+  links.sort((left, right) => left.startIndex - right.startIndex);
+  const projectLink = links[0];
+  const repositoryLink = links.find((link) => parseRepository(link.url));
+
+  if (!projectLink || !repositoryLink) return null;
 
   return {
-    title: referenceLink[1],
-    url: referenceUrl,
-    endIndex: (referenceLink.index ?? 0) + referenceLink[0].length,
+    title: projectLink.title,
+    url: repositoryLink.url,
+    endIndex: projectLink.endIndex,
   };
+}
+
+function cleanDescription(value: string): string {
+  return value
+    .replace(/^\s*[-–—:]\s*/, "")
+    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)]\[[^\]]+]/g, "$1")
+    .replace(/<a\b[^>]*>(.*?)<\/a>/gi, "$1")
+    .replace(/<[^>]+>/g, "")
+    .trim();
 }
 
 /**
@@ -144,7 +193,7 @@ export function parseAwesomeList(markdown: string): AwesomeEntry[] {
       continue;
     }
 
-    const listItem = /^\s*[-*+]\s+(.+)$/.exec(line)?.[1];
+    const listItem = LIST_ITEM_PATTERN.exec(line)?.[1];
     const link = listItem ? extractLink(listItem, references) : null;
 
     if (!listItem || !link) {
@@ -158,10 +207,7 @@ export function parseAwesomeList(markdown: string): AwesomeEntry[] {
       continue;
     }
 
-    const description = listItem
-      .slice(link.endIndex)
-      .replace(/^\s*[-–—:]\s*/, "")
-      .trim();
+    const description = cleanDescription(listItem.slice(link.endIndex));
 
     entries.push({
       title: link.title.trim() || repository.name,

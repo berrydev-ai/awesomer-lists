@@ -103,7 +103,7 @@ function parseRepository(
   }
 
   return {
-    nwo: value.nameWithOwner,
+    nameWithOwner: value.nameWithOwner,
     url: value.url,
     description: optionalString(value.description),
     stars: value.stargazerCount,
@@ -138,7 +138,7 @@ export function parseRepositoryMetadataResponse(
     if (item) {
       metadata.push(item);
     } else {
-      missing.push(repository.nwo);
+      missing.push(repository.nameWithOwner);
     }
   });
 

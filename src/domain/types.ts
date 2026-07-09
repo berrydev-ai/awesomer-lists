@@ -1,7 +1,7 @@
 export interface RepositoryRef {
   owner: string;
   name: string;
-  nwo: string;
+  nameWithOwner: string;
   url: string;
 }
 
@@ -14,7 +14,7 @@ export interface AwesomeEntry {
 }
 
 export interface RepositoryMetadata {
-  nwo: string;
+  nameWithOwner: string;
   url: string;
   description: string | null;
   stars: number;
