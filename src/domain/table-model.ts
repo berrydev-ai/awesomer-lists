@@ -1,9 +1,11 @@
+import { getMaintenanceStatus } from "./maintenance";
 import type {
   AwesomeEntry,
   ProjectRow,
   RepositoryMetadata,
   SortDirection,
   SortField,
+  TableFacets,
   TableGroup,
   TableOptions,
 } from "./types";
@@ -27,9 +29,24 @@ function compareNullable(
   return direction === "asc" ? result : -result;
 }
 
-function sortValue(row: ProjectRow, field: SortField): number | string | null {
+function sortValue(
+  row: ProjectRow,
+  field: SortField,
+  now: Date,
+): number | string | null {
   if (field === "name") return row.title.toLocaleLowerCase();
+  if (field === "maintenance") {
+    const rank = { active: 0, quiet: 1, stale: 2, archived: 3, unknown: 4 };
+    return rank[
+      getMaintenanceStatus(
+        row.metadata?.lastCommitAt ?? null,
+        row.metadata?.isArchived ?? false,
+        now,
+      )
+    ];
+  }
   if (field === "lastCommitAt") return row.metadata?.lastCommitAt ?? null;
+  if (field === "license") return row.metadata?.license?.toLocaleLowerCase() ?? null;
   return row.metadata?.[field] ?? null;
 }
 
@@ -47,7 +64,10 @@ function matchesQuery(row: ProjectRow, query: string): boolean {
   ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
 }
 
-function matchesMetadataFilters(row: ProjectRow, options: TableOptions): boolean {
+function matchesBaseMetadataFilters(
+  row: ProjectRow,
+  options: TableOptions,
+): boolean {
   if (options.hideArchived && row.metadata?.isArchived) {
     return false;
   }
@@ -68,6 +88,38 @@ function matchesMetadataFilters(row: ProjectRow, options: TableOptions): boolean
   return new Date(lastCommitAt).getTime() >= cutoff;
 }
 
+function matchesMaintenance(row: ProjectRow, options: TableOptions): boolean {
+  if (!options.maintenanceStatuses?.length) return true;
+
+  return options.maintenanceStatuses.includes(
+    getMaintenanceStatus(
+      row.metadata?.lastCommitAt ?? null,
+      row.metadata?.isArchived ?? false,
+      options.now,
+    ),
+  );
+}
+
+function matchesLicense(row: ProjectRow, options: TableOptions): boolean {
+  if (!options.licenses?.length) return true;
+  return options.licenses.includes(row.metadata?.license ?? "No license");
+}
+
+function createRows(
+  entries: readonly AwesomeEntry[],
+  metadata: readonly RepositoryMetadata[],
+): ProjectRow[] {
+  const metadataByRepository = new Map(
+    metadata.map((item) => [item.nameWithOwner.toLowerCase(), item]),
+  );
+
+  return entries.map((entry) => ({
+    ...entry,
+    metadata:
+      metadataByRepository.get(entry.repository.nameWithOwner.toLowerCase()) ?? null,
+  }));
+}
+
 /**
  * Builds grouped, sortable table rows while preserving the README section order.
  */
@@ -76,28 +128,19 @@ export function buildTableGroups(
   metadata: readonly RepositoryMetadata[],
   options: TableOptions,
 ): TableGroup[] {
-  const metadataByRepository = new Map(
-    metadata.map((item) => [item.nameWithOwner.toLowerCase(), item]),
-  );
   const groups = new Map<string, TableGroup>();
 
-  for (const entry of entries) {
-    const row: ProjectRow = {
-      ...entry,
-      metadata:
-        metadataByRepository.get(entry.repository.nameWithOwner.toLowerCase()) ?? null,
-    };
-
+  for (const row of createRows(entries, metadata)) {
     if (
       !matchesQuery(row, options.query) ||
-      !matchesMetadataFilters(row, options)
+      !matchesBaseMetadataFilters(row, options) ||
+      !matchesMaintenance(row, options) ||
+      !matchesLicense(row, options)
     ) {
       continue;
     }
 
-    const sectionPath = entry.sectionPath.length
-      ? entry.sectionPath
-      : ["Other"];
+    const sectionPath = row.sectionPath.length ? row.sectionPath : ["Other"];
     const key = sectionPath.join("\u001f");
     const group = groups.get(key) ?? {
       key,
@@ -114,10 +157,55 @@ export function buildTableGroups(
     ...group,
     rows: [...group.rows].sort((left, right) =>
       compareNullable(
-        sortValue(left, options.sort.field),
-        sortValue(right, options.sort.field),
+        sortValue(left, options.sort.field, options.now),
+        sortValue(right, options.sort.field, options.now),
         options.sort.direction,
       ),
     ),
   }));
+}
+
+/**
+ * Counts maintenance and license choices while honoring the other active facet.
+ */
+export function buildTableFacets(
+  entries: readonly AwesomeEntry[],
+  metadata: readonly RepositoryMetadata[],
+  options: TableOptions,
+): TableFacets {
+  const rows = createRows(entries, metadata).filter(
+    (row) =>
+      matchesQuery(row, options.query) &&
+      matchesBaseMetadataFilters(row, options),
+  );
+  const maintenance: TableFacets["maintenance"] = {
+    active: 0,
+    quiet: 0,
+    stale: 0,
+    archived: 0,
+    unknown: 0,
+  };
+
+  rows.filter((row) => matchesLicense(row, options)).forEach((row) => {
+    const status = getMaintenanceStatus(
+      row.metadata?.lastCommitAt ?? null,
+      row.metadata?.isArchived ?? false,
+      options.now,
+    );
+    maintenance[status] += 1;
+  });
+
+  const licenseCounts = new Map<string, number>();
+  rows.filter((row) => matchesMaintenance(row, options)).forEach((row) => {
+    const license = row.metadata?.license ?? "No license";
+    licenseCounts.set(license, (licenseCounts.get(license) ?? 0) + 1);
+  });
+
+  return {
+    total: rows.length,
+    maintenance,
+    licenses: [...licenseCounts.entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((left, right) => left.value.localeCompare(right.value)),
+  };
 }

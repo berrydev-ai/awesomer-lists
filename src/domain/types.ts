@@ -26,13 +26,21 @@ export interface RepositoryMetadata {
   fetchedAt: string;
 }
 
-export type SortField = "name" | "stars" | "lastCommitAt" | "openIssues";
+export type SortField =
+  | "name"
+  | "maintenance"
+  | "stars"
+  | "lastCommitAt"
+  | "openIssues"
+  | "license";
 export type SortDirection = "asc" | "desc";
 
 export interface TableOptions {
   query: string;
   hideArchived: boolean;
   updatedWithinDays: number | null;
+  maintenanceStatuses?: readonly MaintenanceStatus[];
+  licenses?: readonly string[];
   sort: {
     field: SortField;
     direction: SortDirection;
@@ -50,3 +58,10 @@ export interface TableGroup {
   sectionPath: string[];
   rows: ProjectRow[];
 }
+
+export interface TableFacets {
+  total: number;
+  maintenance: Record<MaintenanceStatus, number>;
+  licenses: Array<{ value: string; count: number }>;
+}
+import type { MaintenanceStatus } from "./maintenance";

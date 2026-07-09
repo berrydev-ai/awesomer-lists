@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTableGroups } from "./table-model";
+import { buildTableFacets, buildTableGroups } from "./table-model";
 import type { AwesomeEntry, RepositoryMetadata } from "./types";
 
 describe("buildTableGroups", () => {
@@ -79,6 +79,83 @@ describe("buildTableGroups", () => {
     expect(groups[0]?.rows.map((row) => row.repository.nameWithOwner)).toEqual([
       "vitejs/vite",
     ]);
+  });
+
+  it("filters by maintenance and license, then sorts maintenance status", () => {
+    const entries = [
+      createEntry("vitejs/vite", ["Frameworks"]),
+      createEntry("facebook/react", ["Frameworks"]),
+      createEntry("sindresorhus/awesome", ["Frameworks"]),
+    ];
+    const metadata = [
+      {
+        ...createMetadata("vitejs/vite", 10),
+        lastCommitAt: "2026-07-01T12:00:00Z",
+        license: "MIT",
+      },
+      {
+        ...createMetadata("facebook/react", 20),
+        lastCommitAt: "2026-01-01T12:00:00Z",
+        license: "MIT",
+      },
+      {
+        ...createMetadata("sindresorhus/awesome", 30),
+        lastCommitAt: "2024-01-01T12:00:00Z",
+        license: "CC0-1.0",
+      },
+    ];
+
+    const groups = buildTableGroups(entries, metadata, {
+      query: "",
+      hideArchived: false,
+      updatedWithinDays: null,
+      maintenanceStatuses: ["active", "quiet"],
+      licenses: ["MIT"],
+      sort: { field: "maintenance", direction: "desc" },
+      now: new Date("2026-07-09T12:00:00Z"),
+    });
+
+    expect(groups[0]?.rows.map((row) => row.repository.nameWithOwner)).toEqual([
+      "facebook/react",
+      "vitejs/vite",
+    ]);
+  });
+});
+
+describe("buildTableFacets", () => {
+  it("counts each facet with the other active facet applied", () => {
+    const entries = [
+      createEntry("vitejs/vite", ["Frameworks"]),
+      createEntry("facebook/react", ["Frameworks"]),
+      createEntry("sindresorhus/awesome", ["Resources"]),
+    ];
+    const metadata = [
+      { ...createMetadata("vitejs/vite", 10), license: "MIT" },
+      {
+        ...createMetadata("facebook/react", 20),
+        lastCommitAt: "2026-01-01T12:00:00Z",
+        license: "MIT",
+      },
+      {
+        ...createMetadata("sindresorhus/awesome", 30),
+        lastCommitAt: "2024-01-01T12:00:00Z",
+        license: "CC0-1.0",
+      },
+    ];
+
+    const facets = buildTableFacets(entries, metadata, {
+      query: "",
+      hideArchived: false,
+      updatedWithinDays: null,
+      maintenanceStatuses: ["active", "quiet"],
+      licenses: ["MIT"],
+      sort: { field: "stars", direction: "desc" },
+      now: new Date("2026-07-09T12:00:00Z"),
+    });
+
+    expect(facets.total).toBe(3);
+    expect(facets.maintenance).toMatchObject({ active: 1, quiet: 1, stale: 0 });
+    expect(facets.licenses).toEqual([{ value: "MIT", count: 2 }]);
   });
 });
 

@@ -116,9 +116,7 @@ describe("content modal workflow", () => {
     const projectLink = await waitUntil(() =>
       shadow.querySelector<HTMLAnchorElement>(".project-link"),
     );
-    const popularity = shadow.querySelectorAll<HTMLTableCellElement>(
-      ".project-row td",
-    )[2];
+    const popularity = shadow.querySelector<HTMLElement>(".popularity-cell");
 
     expect(projectLink.textContent).toBe("Mastra");
     expect(popularity?.textContent).toContain("20,000");
@@ -128,6 +126,59 @@ describe("content modal workflow", () => {
         repositories: ["mastra-ai/mastra"],
       }),
     );
+
+    const dialog = shadow.querySelector<HTMLElement>(".dialog");
+    const settingsButton = shadow.querySelector<HTMLButtonElement>(
+      "#settings-button",
+    );
+    const settingsPanel = shadow.querySelector<HTMLElement>("#settings-panel");
+    if (!dialog || !settingsButton || !settingsPanel) {
+      throw new Error("The redesigned modal shell was not rendered.");
+    }
+
+    expect(dialog.dataset.theme).toBe("system");
+    expect(settingsPanel.hidden).toBe(true);
+    settingsButton.click();
+    expect(settingsPanel.hidden).toBe(false);
+
+    const lightTheme = shadow.querySelector<HTMLButtonElement>(
+      '[data-theme-mode="light"]',
+    );
+    if (!lightTheme) throw new Error("Light theme control was not rendered.");
+    lightTheme.click();
+    expect(dialog.dataset.theme).toBe("light");
+
+    shadow
+      .querySelector<HTMLButtonElement>('[data-accent="rose"]')
+      ?.click();
+    expect(dialog.dataset.accent).toBe("rose");
+
+    const activeChip = shadow.querySelector<HTMLButtonElement>(
+      '[data-maintenance="active"]',
+    );
+    activeChip?.click();
+    expect(activeChip?.getAttribute("aria-pressed")).toBe("true");
+
+    shadow.querySelector<HTMLButtonElement>("#license-filter-button")?.click();
+    expect(
+      shadow.querySelector<HTMLElement>("#license-filter-panel")?.hidden,
+    ).toBe(false);
+    expect(shadow.querySelector("#license-filter-panel")?.textContent).toContain(
+      "Apache-2.0",
+    );
+
+    const collapseButton = shadow.querySelector<HTMLButtonElement>(
+      "#toggle-groups-button",
+    );
+    collapseButton?.click();
+    expect(shadow.querySelectorAll(".project-row")).toHaveLength(0);
+    expect(collapseButton?.textContent).toContain("Expand all");
+    collapseButton?.click();
+    expect(shadow.querySelectorAll(".project-row")).toHaveLength(1);
+
+    expect(
+      shadow.querySelector<HTMLAnchorElement>("#project-repository-link")?.href,
+    ).toBe("https://github.com/berrydev-ai/awesomer-lists");
   });
 });
 
