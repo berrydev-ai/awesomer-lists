@@ -31,6 +31,8 @@ Search and filters work across project names, descriptions, repository names, an
 
 At a repository root, the extension reads the preferred README through GitHub's API. On a rendered Markdown file page, it reads that exact file's raw source. It recognizes GitHub repository links in Markdown list items and groups them by their nearest headings.
 
+Standard Awesome tables of contents link to those headings, so the heading hierarchy is the grouping source of truth. Nested headings appear as `Parent › Child`.
+
 ## Create the GitHub token
 
 Use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) created only for this extension.
@@ -41,7 +43,7 @@ Recommended settings:
 - Set **Contents** to **Read-only**.
 - Set **Issues** to **Read-only**.
 - Leave every write permission off.
-- Do not grant private repository access unless you intentionally want to analyze private lists.
+- Keep repository access limited to public repositories.
 
 Fine-grained tokens include read access to public repositories. The extension uses GraphQL batches so one request can load many projects with exact issue-only and default-branch commit data.
 
@@ -58,6 +60,8 @@ By default, the token is kept only in Chrome's session storage and is cleared wh
 The token is sent only to `api.github.com`. Page code can check whether a token exists, but cannot read it back. The extension has no analytics or external service.
 
 The extension accepts up to 5,000 unique GitHub repositories from one source file. The cap prevents a compromised page from creating an unbounded API workload.
+
+Private Awesome lists are not supported in this version. Exact Markdown blob sources are fetched without sending the token to `raw.githubusercontent.com`.
 
 ## Maintenance labels
 

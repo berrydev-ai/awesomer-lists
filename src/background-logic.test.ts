@@ -14,5 +14,9 @@ describe("normalizeRepositoryNames", () => {
     expect(() => normalizeRepositoryNames(["settings/profile"], 5_000)).toThrow(
       "Invalid repository name",
     );
+
+    expect(
+      normalizeRepositoryNames(["vitejs/vite", "VITEJS/VITE"], 1),
+    ).toHaveLength(1);
   });
 });

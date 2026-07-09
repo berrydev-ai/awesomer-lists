@@ -10,6 +10,7 @@ import {
 import type { RateLimitInfo } from "./github/graphql";
 import type {
   AuthStatus,
+  ExtensionRequest,
   ExtensionResponse,
   MetadataLoadResult,
 } from "./messages";
@@ -30,6 +31,15 @@ interface CachedMetadata {
 interface RequestMessage extends Record<string, unknown> {
   type: string;
 }
+
+type RequestType = ExtensionRequest["type"];
+type RequestByType<T extends RequestType> = Extract<
+  ExtensionRequest,
+  { type: T }
+>;
+type RequestHandlers = {
+  [T in RequestType]: (request: RequestByType<T>) => Promise<unknown>;
+};
 
 // Only the service worker needs direct storage access; requests wait until that boundary is active.
 const storageReady = Promise.all([
@@ -248,18 +258,19 @@ async function loadMetadata(
   };
 }
 
-async function handleRequest(request: RequestMessage): Promise<unknown> {
-  if (request.type === "auth.status") return getAuthStatus();
-  if (request.type === "auth.clear") return clearToken();
-
-  if (request.type === "auth.save") {
-    if (typeof request.token !== "string" || typeof request.remember !== "boolean") {
+const requestHandlers = {
+  "auth.status": async () => getAuthStatus(),
+  "auth.clear": async () => clearToken(),
+  "auth.save": async (request) => {
+    if (
+      typeof request.token !== "string" ||
+      typeof request.remember !== "boolean"
+    ) {
       throw new Error("Invalid token settings.");
     }
     return saveToken(request.token, request.remember);
-  }
-
-  if (request.type === "readme.load") {
+  },
+  "readme.load": async (request) => {
     if (
       typeof request.repository !== "string" ||
       (request.sourceUrl !== null && typeof request.sourceUrl !== "string")
@@ -288,21 +299,27 @@ async function handleRequest(request: RequestMessage): Promise<unknown> {
       );
     }
     return fetchRepositoryReadme(repository, token, { sourceUrl });
-  }
+  },
+  "metadata.load": async (request) => {
+    if (
+      !Array.isArray(request.repositories) ||
+      !request.repositories.every((value) => typeof value === "string") ||
+      typeof request.refresh !== "boolean"
+    ) {
+      throw new Error("Invalid metadata request.");
+    }
 
-  if (request.type !== "metadata.load") {
-    throw new Error("Unknown extension request.");
-  }
+    return loadMetadata(request.repositories, request.refresh);
+  },
+} satisfies RequestHandlers;
 
-  if (
-    !Array.isArray(request.repositories) ||
-    !request.repositories.every((value) => typeof value === "string") ||
-    typeof request.refresh !== "boolean"
-  ) {
-    throw new Error("Invalid metadata request.");
-  }
+async function handleRequest(request: RequestMessage): Promise<unknown> {
+  const handler = requestHandlers[request.type as RequestType] as
+    | ((request: never) => Promise<unknown>)
+    | undefined;
 
-  return loadMetadata(request.repositories, request.refresh);
+  if (!handler) throw new Error("Unknown extension request.");
+  return handler(request as never);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

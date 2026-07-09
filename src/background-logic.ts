@@ -8,10 +8,6 @@ export function normalizeRepositoryNames(
   values: readonly string[],
   maximum: number,
 ): RepositoryRef[] {
-  if (values.length > maximum) {
-    throw new Error(`Awesome lists are limited to ${maximum} projects.`);
-  }
-
   const seen = new Set<string>();
   const repositories: RepositoryRef[] = [];
 
@@ -32,6 +28,10 @@ export function normalizeRepositoryNames(
         nameWithOwner,
         url: `https://github.com/${nameWithOwner}`,
       });
+
+      if (repositories.length > maximum) {
+        throw new Error(`Awesome lists are limited to ${maximum} projects.`);
+      }
     }
   }
 

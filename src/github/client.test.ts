@@ -11,14 +11,18 @@ describe("fetchRepositoryReadme", () => {
     let requestedUrl = "";
     let requestedHeaders = new Headers();
 
-    const markdown = await fetchRepositoryReadme(repository, "github_pat_dedicated", {
-      sourceUrl,
-      fetchImplementation: async (input, init) => {
-        requestedUrl = String(input);
-        requestedHeaders = new Headers(init?.headers);
-        return new Response("# Awesome Agents", { status: 200 });
+    const markdown = await fetchRepositoryReadme(
+      repository,
+      "dedicated-token-value-for-test",
+      {
+        sourceUrl,
+        fetchImplementation: async (input, init) => {
+          requestedUrl = String(input);
+          requestedHeaders = new Headers(init?.headers);
+          return new Response("# Awesome Agents", { status: 200 });
+        },
       },
-    });
+    );
 
     expect(markdown).toBe("# Awesome Agents");
     expect(requestedUrl).toBe(sourceUrl);
@@ -32,7 +36,7 @@ function createRepository(nameWithOwner: string): RepositoryRef {
   return {
     owner,
     name,
-    nameWithOwner: nameWithOwner,
+    nameWithOwner,
     url: `https://github.com/${nameWithOwner}`,
   };
 }
