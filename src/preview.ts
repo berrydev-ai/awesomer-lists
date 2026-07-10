@@ -1,99 +1,18 @@
-import type { RepositoryMetadata } from "./domain/types";
 import type {
   AuthStatus,
   ExtensionRequest,
   ExtensionResponse,
   MetadataLoadResult,
 } from "./messages";
+import type { PreviewConfig } from "./preview-config";
+import {
+  PREVIEW_MARKDOWN,
+  PREVIEW_METADATA,
+  PREVIEW_README_SOURCE_URL,
+  PREVIEW_SNAPSHOT_CAPTURED_AT,
+} from "./preview-snapshot";
 
 type ContentListener = (message: unknown) => void;
-
-const SOURCE_REPOSITORY = "andyrewlee/awesome-agent-orchestrators";
-const SOURCE_URL = `https://github.com/${SOURCE_REPOSITORY}#readme`;
-const DAY_IN_MILLISECONDS = 86_400_000;
-const now = new Date();
-
-const markdown = `# Awesome Agent Orchestrators
-
-## Agent Frameworks
-
-- [Mastra](https://github.com/mastra-ai/mastra) - Build AI applications and agents with TypeScript.
-- [CrewAI](https://github.com/crewAIInc/crewAI) - Framework for orchestrating role-playing autonomous agents.
-
-## Parallel Agent Runners
-
-- [OpenHands](https://github.com/All-Hands-AI/OpenHands) - Platform for software development agents.
-- [Codex](https://github.com/openai/codex) - Lightweight coding agent that runs in your terminal.
-- [Orca](https://github.com/stablyai/orca) - Run multiple coding agents across isolated worktrees.
-
-## Session & Memory
-
-- [Mem0](https://github.com/mem0ai/mem0) - Universal memory layer for AI agents.
-
-## Legacy and Archived
-
-- [AutoGen](https://github.com/microsoft/autogen) - Framework for agentic AI applications.
-`;
-
-const previewMetadata: RepositoryMetadata[] = [
-  createMetadata("mastra-ai/mastra", {
-    description: "Build AI applications and agents with TypeScript.",
-    stars: 20_480,
-    forks: 1_620,
-    openIssues: 132,
-    commitDaysAgo: 1,
-    license: "Apache-2.0",
-  }),
-  createMetadata("crewAIInc/crewAI", {
-    description: "Framework for orchestrating role-playing autonomous agents.",
-    stars: 42_190,
-    forks: 5_880,
-    openIssues: 218,
-    commitDaysAgo: 18,
-    license: "MIT",
-  }),
-  createMetadata("All-Hands-AI/OpenHands", {
-    description: "Platform for software development agents.",
-    stars: 68_320,
-    forks: 8_410,
-    openIssues: 480,
-    commitDaysAgo: 54,
-    license: "MIT",
-  }),
-  createMetadata("openai/codex", {
-    description: "Lightweight coding agent that runs in your terminal.",
-    stars: 39_760,
-    forks: 4_120,
-    openIssues: 305,
-    commitDaysAgo: 3,
-    license: "Apache-2.0",
-  }),
-  createMetadata("stablyai/orca", {
-    description: "Run multiple coding agents across isolated worktrees.",
-    stars: 15_002,
-    forks: 1_048,
-    openIssues: 51,
-    commitDaysAgo: 180,
-    license: "MIT",
-  }),
-  createMetadata("mem0ai/mem0", {
-    description: "Universal memory layer for AI agents.",
-    stars: 44_860,
-    forks: 4_690,
-    openIssues: 164,
-    commitDaysAgo: 520,
-    license: "Apache-2.0",
-  }),
-  createMetadata("microsoft/autogen", {
-    description: "Framework for agentic AI applications.",
-    stars: 52_240,
-    forks: 7_610,
-    openIssues: 690,
-    commitDaysAgo: 760,
-    license: "CC-BY-4.0",
-    isArchived: true,
-  }),
-];
 
 let listener: ContentListener | null = null;
 let connected = true;
@@ -101,12 +20,25 @@ const openPreviewButton = getOpenPreviewButton();
 
 (
   globalThis as typeof globalThis & {
-    __AWESOMER_PREVIEW__?: { pageUrl: string; sourceLabel: string };
+    __AWESOMER_PREVIEW__?: PreviewConfig;
   }
 ).__AWESOMER_PREVIEW__ = {
-  pageUrl: SOURCE_URL,
-  sourceLabel: `${SOURCE_REPOSITORY} · UI preview fixtures`,
+  pageUrl: PREVIEW_README_SOURCE_URL,
+  sourceLabel:
+    "awesome-agent-orchestrators · GitHub snapshot · Jul 10, 2026",
+  referenceNow: PREVIEW_SNAPSHOT_CAPTURED_AT,
 };
+
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin) return;
+  const data = event.data as {
+    type?: unknown;
+    auth?: { hasToken?: unknown };
+  };
+  if (data?.type === "awesomer.auth.saved" && data.auth?.hasToken === true) {
+    connected = true;
+  }
+});
 
 globalThis.chrome = {
   runtime: {
@@ -147,34 +79,6 @@ function getOpenPreviewButton(): HTMLButtonElement {
   return button;
 }
 
-function createMetadata(
-  nameWithOwner: string,
-  values: {
-    description: string;
-    stars: number;
-    forks: number;
-    openIssues: number;
-    commitDaysAgo: number;
-    license: string;
-    isArchived?: boolean;
-  },
-): RepositoryMetadata {
-  return {
-    nameWithOwner,
-    url: `https://github.com/${nameWithOwner}`,
-    description: values.description,
-    stars: values.stars,
-    forks: values.forks,
-    openIssues: values.openIssues,
-    lastCommitAt: new Date(
-      now.getTime() - values.commitDaysAgo * DAY_IN_MILLISECONDS,
-    ).toISOString(),
-    license: values.license,
-    isArchived: values.isArchived ?? false,
-    fetchedAt: now.toISOString(),
-  };
-}
-
 async function handlePreviewRequest(
   request: ExtensionRequest,
 ): Promise<ExtensionResponse<unknown>> {
@@ -204,19 +108,19 @@ async function handlePreviewRequest(
     });
   }
 
-  if (request.type === "readme.load") return success(markdown);
+  if (request.type === "readme.load") return success(PREVIEW_MARKDOWN);
 
   const requested = new Set(
     request.repositories.map((repository) => repository.toLocaleLowerCase()),
   );
   const result: MetadataLoadResult = {
-    metadata: previewMetadata.filter((item) =>
+    metadata: PREVIEW_METADATA.filter((item) =>
       requested.has(item.nameWithOwner.toLocaleLowerCase()),
     ),
     missing: [],
     rateLimit: {
       remaining: 4_868,
-      resetAt: new Date(now.getTime() + 3_600_000).toISOString(),
+      resetAt: "2026-07-10T14:32:33Z",
     },
     cachedCount: request.refresh ? 0 : 2,
   };

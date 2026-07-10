@@ -25,6 +25,7 @@ const previewContext = await context({
 });
 
 await previewContext.rebuild();
+await previewContext.watch();
 const server = await previewContext.serve({
   servedir: outputDirectory,
   host,

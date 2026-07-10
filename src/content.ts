@@ -24,15 +24,11 @@ import type {
   ExtensionResponse,
   MetadataLoadResult,
 } from "./messages";
+import type { PreviewConfig } from "./preview-config";
 import { formatRepositoryCount } from "./ui/format";
 
 const ROOT_ID = "awesomer-lists-extension-root";
 let activeModalCleanup: (() => void) | null = null;
-
-interface PreviewConfig {
-  pageUrl: string;
-  sourceLabel: string;
-}
 
 interface RequestFailure extends Error {
   code: string;
@@ -1239,7 +1235,7 @@ async function openModal(): Promise<void> {
       maintenanceStatuses: [],
       licenses: [],
       sort: { field: "stars", direction: "desc" },
-      now: new Date(),
+      now: new Date(previewConfig?.referenceNow ?? Date.now()),
     },
     collapsedGroups: new Set(),
     settingsOpen: false,
@@ -1383,7 +1379,7 @@ async function openModal(): Promise<void> {
   };
 
   const renderTable = (): void => {
-    state.options.now = new Date();
+    state.options.now = new Date(previewConfig?.referenceNow ?? Date.now());
     const groups = buildTableGroups(state.entries, state.metadata, state.options);
     const facets = buildTableFacets(state.entries, state.metadata, state.options);
     tableBody.replaceChildren();

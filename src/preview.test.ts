@@ -2,6 +2,8 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AuthStatus, ExtensionResponse } from "./messages";
+
 let modalShadowRoot: ShadowRoot | null;
 const nativeAttachShadow = Element.prototype.attachShadow;
 
@@ -46,6 +48,24 @@ describe("standalone UI preview", () => {
     expect(
       document.getElementById("awesomer-lists-extension-root")?.shadowRoot,
     ).toBeNull();
+
+    await chrome.runtime.sendMessage({ type: "auth.clear" });
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: location.origin,
+        data: {
+          type: "awesomer.auth.saved",
+          auth: { hasToken: true, remembered: false, login: "UI preview" },
+        },
+      }),
+    );
+    const authResponse = (await chrome.runtime.sendMessage({
+      type: "auth.status",
+    })) as ExtensionResponse<AuthStatus>;
+    expect(authResponse).toEqual({
+      ok: true,
+      data: { hasToken: true, remembered: false, login: "UI preview" },
+    });
 
     const openButton = document.querySelector<HTMLButtonElement>(
       "#open-preview-button",
