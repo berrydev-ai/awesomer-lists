@@ -77,6 +77,7 @@ These labels are visible rules, not a hidden quality score. Stars and issue coun
 - `npm test` runs behavior tests.
 - `npm run typecheck` checks TypeScript.
 - `npm run build` creates the unpacked extension in `dist`.
+- `npm run dev` serves the UI preview and reloads the browser after changes.
 - `npm run preview` opens a browser-ready UI build at `http://127.0.0.1:4173/preview.html`.
 - `npm run check` runs all three checks.
 
@@ -89,3 +90,5 @@ npm run preview
 ```
 
 Then open [http://127.0.0.1:4173/preview.html](http://127.0.0.1:4173/preview.html). The preview uses a committed snapshot of public GitHub data captured on July 10, 2026. Its source URLs are recorded in `src/preview-snapshot.ts`. It does not call GitHub, require a token, or store anything. Changes to the modal source rebuild when the page is refreshed. Press `Ctrl+C` to stop the server.
+
+For automatic browser reload while editing the preview UI, run `npm run dev` instead. Changes under `src`, `preview`, or `public` rebuild the affected files and reload the open page.
