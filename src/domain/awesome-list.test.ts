@@ -123,4 +123,33 @@ describe("parseAwesomeList", () => {
       "Coordinate remote agent workstations. Supports multiple coding-agent runtimes.",
     );
   });
+
+  it("parses repository rows from Markdown tables", () => {
+    const markdown = `# Awesome cmux
+
+## Feature Dimensions
+
+### Sidebar & Status Pills
+
+| Repo | Agent | Description | Stars |
+|------|-------|-------------|-------|
+| ![TypeScript](https://img.shields.io/badge/typescript) [cmux-hub](https://github.com/azu/cmux-hub) | Claude Code | Review sessions in a browser-based diff viewer. | 23 |
+| [ocx](https://github.com/kdcokenny/ocx) | OpenCode | Manage portable configuration profiles. | 669 |
+`;
+
+    expect(parseAwesomeList(markdown)).toEqual([
+      expect.objectContaining({
+        title: "cmux-hub",
+        description: "Review sessions in a browser-based diff viewer.",
+        repository: expect.objectContaining({ nameWithOwner: "azu/cmux-hub" }),
+        sectionPath: ["Feature Dimensions", "Sidebar & Status Pills"],
+      }),
+      expect.objectContaining({
+        title: "ocx",
+        description: "Manage portable configuration profiles.",
+        repository: expect.objectContaining({ nameWithOwner: "kdcokenny/ocx" }),
+        sectionPath: ["Feature Dimensions", "Sidebar & Status Pills"],
+      }),
+    ]);
+  });
 });

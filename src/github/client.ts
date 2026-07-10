@@ -23,6 +23,12 @@ export interface ReadmeRequestOptions {
   fetchImplementation?: typeof fetch;
 }
 
+interface GraphqlResponseError {
+  message: string;
+  type: string | null;
+  path: unknown[] | null;
+}
+
 function createClientError(
   code: GitHubErrorCode,
   message: string,
@@ -79,7 +85,7 @@ async function assertSuccessfulResponse(response: Response): Promise<void> {
   );
 }
 
-function readGraphqlErrors(value: unknown): string[] {
+function readGraphqlErrors(value: unknown): GraphqlResponseError[] {
   if (typeof value !== "object" || value === null || !("errors" in value)) {
     return [];
   }
@@ -89,15 +95,47 @@ function readGraphqlErrors(value: unknown): string[] {
   if (!Array.isArray(errors)) return [];
 
   return errors
-    .map((error) =>
-      typeof error === "object" &&
-      error !== null &&
-      "message" in error &&
-      typeof error.message === "string"
-        ? error.message
-        : null,
-    )
-    .filter((message): message is string => message !== null);
+    .map((error): GraphqlResponseError | null => {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("message" in error) ||
+        typeof error.message !== "string"
+      ) {
+        return null;
+      }
+
+      return {
+        message: error.message,
+        type:
+          "type" in error && typeof error.type === "string"
+            ? error.type
+            : null,
+        path: "path" in error && Array.isArray(error.path) ? error.path : null,
+      };
+    })
+    .filter((error): error is GraphqlResponseError => error !== null);
+}
+
+function isMissingRepositoryError(
+  error: GraphqlResponseError,
+  payload: unknown,
+): boolean {
+  if (
+    error.type !== "NOT_FOUND" ||
+    error.path?.length !== 1 ||
+    typeof error.path[0] !== "string" ||
+    !/^r\d+$/.test(error.path[0]) ||
+    typeof payload !== "object" ||
+    payload === null ||
+    !("data" in payload) ||
+    typeof payload.data !== "object" ||
+    payload.data === null
+  ) {
+    return false;
+  }
+
+  return (payload.data as Record<string, unknown>)[error.path[0]] === null;
 }
 
 /**
@@ -121,7 +159,10 @@ export async function validateGitHubToken(
   const errors = readGraphqlErrors(payload);
 
   if (errors.length > 0) {
-    throw createClientError("INVALID_TOKEN", errors[0] ?? "Invalid token.");
+    throw createClientError(
+      "INVALID_TOKEN",
+      errors[0]?.message ?? "Invalid token.",
+    );
   }
 
   if (
@@ -193,11 +234,14 @@ export async function fetchRepositoryMetadataBatch(
 
   const payload: unknown = await response.json();
   const errors = readGraphqlErrors(payload);
+  const fatalError = errors.find(
+    (error) => !isMissingRepositoryError(error, payload),
+  );
 
-  if (errors.length > 0) {
+  if (fatalError) {
     throw createClientError(
       "GITHUB_ERROR",
-      errors[0] ?? "GitHub could not load repository metadata.",
+      fatalError.message || "GitHub could not load repository metadata.",
     );
   }
 
