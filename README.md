@@ -77,4 +77,15 @@ These labels are visible rules, not a hidden quality score. Stars and issue coun
 - `npm test` runs behavior tests.
 - `npm run typecheck` checks TypeScript.
 - `npm run build` creates the unpacked extension in `dist`.
+- `npm run preview` opens a browser-ready UI build at `http://127.0.0.1:4173/preview.html`.
 - `npm run check` runs all three checks.
+
+### Preview the UI without loading the extension
+
+Run:
+
+```sh
+npm run preview
+```
+
+Then open [http://127.0.0.1:4173/preview.html](http://127.0.0.1:4173/preview.html). The preview uses clearly labeled, static UI fixtures based on public repositories. It does not call GitHub, require a token, or store anything. Changes to the modal source rebuild when the page is refreshed. Press `Ctrl+C` to stop the server.

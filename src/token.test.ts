@@ -94,6 +94,35 @@ describe("secure token page", () => {
       "*",
     );
   });
+
+  it("runs as a no-storage form inside the standalone UI preview", async () => {
+    (
+      window as typeof window & { happyDOM: { setURL: (url: string) => void } }
+    ).happyDOM.setURL(
+      "http://127.0.0.1:4173/token.html?preview=1&theme=dark&accent=indigo",
+    );
+    delete (globalThis as typeof globalThis & { chrome?: typeof chrome }).chrome;
+    const postMessage = vi.spyOn(window.parent, "postMessage");
+
+    await import("./token");
+
+    expect(document.body.textContent).toContain("Preview mode only");
+    const form = document.querySelector<HTMLFormElement>("#token-form");
+    const input = document.querySelector<HTMLInputElement>("#token-input");
+    if (!form || !input) throw new Error("Preview token form was not rendered.");
+
+    input.value = "ui-test-value";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await waitUntil(() => (postMessage.mock.calls.length > 0 ? true : null));
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        type: "awesomer.auth.saved",
+        auth: { hasToken: true, remembered: false, login: "UI preview" },
+      },
+      "*",
+    );
+  });
 });
 
 async function waitUntil<T>(read: () => T | null): Promise<T> {

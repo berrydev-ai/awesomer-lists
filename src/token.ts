@@ -5,6 +5,7 @@ import type {
 } from "./messages";
 
 const params = new URLSearchParams(location.search);
+const isPreview = params.get("preview") === "1";
 const theme = params.get("theme");
 const accent = params.get("accent") ?? "indigo";
 const parentOrigin = document.referrer
@@ -85,11 +86,11 @@ document.body.innerHTML = `
     [hidden] { display: none !important; }
   </style>
   <form id="token-form">
-    <label for="token-input">Personal access token</label>
+    <label for="token-input">${isPreview ? "UI test value" : "Personal access token"}</label>
     <input id="token-input" name="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…" required />
     <label class="check"><input id="remember-token" type="checkbox" /><span>Remember on this device</span></label>
-    <div class="actions"><button id="save-token" type="submit">Save and analyze</button></div>
-    <p class="note">The token field runs on the extension’s own origin, isolated from page scripts.</p>
+    <div class="actions"><button id="save-token" type="submit">${isPreview ? "Continue preview" : "Save and analyze"}</button></div>
+    <p class="note">${isPreview ? "Preview mode only. Enter any test value; nothing is sent or stored." : "The token field runs on the extension’s own origin, isolated from page scripts."}</p>
     <p class="error" id="token-error" role="alert" hidden></p>
   </form>
 `;
@@ -105,6 +106,15 @@ if (!form || !tokenInput || !rememberToken || !saveToken || !tokenError) {
 }
 
 async function sendRequest<T>(request: ExtensionRequest): Promise<T> {
+  if (isPreview) {
+    const previewStatus: AuthStatus = {
+      hasToken: request.type !== "auth.clear",
+      remembered: request.type === "auth.save" ? request.remember : false,
+      login: request.type === "auth.clear" ? null : "UI preview",
+    };
+    return previewStatus as T;
+  }
+
   const response = (await chrome.runtime.sendMessage(
     request,
   )) as ExtensionResponse<T>;

@@ -29,6 +29,11 @@ import { formatRepositoryCount } from "./ui/format";
 const ROOT_ID = "awesomer-lists-extension-root";
 let activeModalCleanup: (() => void) | null = null;
 
+interface PreviewConfig {
+  pageUrl: string;
+  sourceLabel: string;
+}
+
 interface RequestFailure extends Error {
   code: string;
 }
@@ -1014,8 +1019,16 @@ function appendEmptyValue(cell: HTMLElement): void {
 }
 
 async function openModal(): Promise<void> {
-  const page = parseGitHubRepositoryPage(location.href);
-  const currentRawSource = page ? findCurrentRawSource(page) : null;
+  const previewConfig = (
+    globalThis as typeof globalThis & {
+      __AWESOMER_PREVIEW__?: PreviewConfig;
+    }
+  ).__AWESOMER_PREVIEW__;
+  const page = parseGitHubRepositoryPage(
+    previewConfig?.pageUrl ?? location.href,
+  );
+  const currentRawSource =
+    page && !previewConfig ? findCurrentRawSource(page) : null;
   const previousFocus =
     document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const host = document.createElement("div");
@@ -2110,7 +2123,9 @@ async function openModal(): Promise<void> {
     return;
   }
 
-  sourceLink.textContent = `${page.owner}/${page.name} · ${currentRawSource ? "current file source" : "README source"}`;
+  sourceLink.textContent =
+    previewConfig?.sourceLabel ??
+    `${page.owner}/${page.name} · ${currentRawSource ? "current file source" : "README source"}`;
   sourceLink.href =
     currentRawSource ?? `https://github.com/${page.owner}/${page.name}#readme`;
   renderAppearance();
