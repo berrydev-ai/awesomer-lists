@@ -49,15 +49,35 @@ Fine-grained tokens include read access to public repositories. The extension us
 
 By default, the token is kept only in Chrome's session storage and is cleared when the browser session ends. **Remember on this device** stores it in local extension storage. Local extension storage is not a password vault.
 
+## Shared cache
+
+Loading a large list means asking GitHub about every project in it, which is the slow part. Two caches sit in front of that work:
+
+1. **This device.** Repository metadata stays in extension storage for six hours.
+2. **A shared cache server.** Optional. It keeps the same public counters for seven days, so a list somebody else already opened loads without waiting on GitHub again.
+
+Anything still missing after both caches is fetched from GitHub with your own token, then written back to both. **Refresh data** skips both caches and re-reads GitHub. The footer count includes shared hits, and hovering it says how many came from the shared server.
+
+The shared cache is off unless a server is configured. `server/` holds a Cloudflare Worker you can deploy in two commands — see `server/README.md`. Point the extension at it by building with the URL:
+
+```sh
+AWESOMER_CACHE_SERVER_URL=https://your-worker.workers.dev npm run build
+```
+
+Or set it after installing: **chrome://extensions → Awesomer Lists → Details → Extension options**. The same page turns the shared cache off.
+
+**What the server sees.** A lookup sends the repository names in the list you opened, with no cookies and nothing identifying you. Your token, the README, and your GitHub account never leave the extension. The cached counters are public GitHub data, contributed by clients rather than verified, so treat them as a fast approximation and use **Refresh data** when an exact number matters. `server/README.md` describes the trust model in full.
+
 ## Privacy and permissions
 
 - `activeTab` gives temporary access only after you click the toolbar button.
 - `scripting` injects the modal into that active GitHub tab.
-- `storage` keeps the token choice and a six-hour metadata cache.
+- `storage` keeps the token choice, the shared cache setting, and a six-hour metadata cache.
 - `https://api.github.com/*` allows README and metadata requests to GitHub.
 - `https://raw.githubusercontent.com/*` allows the current rendered Markdown file to be read without sending the token to that host.
+- A shared cache server, if one is configured, is the only other host the extension contacts. A URL set from the options page is requested as an optional permission at that moment; a URL baked in at build time appears in the manifest.
 
-The token is sent only to `api.github.com`. Page code can check whether a token exists, but cannot read it back. The extension has no analytics or external service.
+The token is sent only to `api.github.com`. Page code can check whether a token exists, but cannot read it back. The extension has no analytics.
 
 The extension accepts up to 5,000 unique GitHub repositories from one source file. The cap prevents a compromised page from creating an unbounded API workload.
 
@@ -78,6 +98,7 @@ These labels are visible rules, not a hidden quality score. Stars and issue coun
 - `npm run typecheck` checks TypeScript.
 - `npm run build` creates the unpacked extension in `dist`.
 - `npm run dev` serves the UI preview and reloads the browser after changes.
+- `server/` is the shared cache Worker; `npx wrangler dev` inside it serves `http://localhost:8787` for a development build.
 - `npm run preview` opens a browser-ready UI build at `http://127.0.0.1:4173/preview.html`.
 - `npm run check` runs all three checks.
 

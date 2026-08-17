@@ -40,6 +40,7 @@ interface ModalState {
   metadata: RepositoryMetadata[];
   missing: string[];
   cachedCount: number;
+  sharedCachedCount: number;
   rateLimit: MetadataLoadResult["rateLimit"];
   hasLoaded: boolean;
   options: TableOptions;
@@ -1226,6 +1227,7 @@ async function openModal(): Promise<void> {
     metadata: [],
     missing: [],
     cachedCount: 0,
+    sharedCachedCount: 0,
     rateLimit: null,
     hasLoaded: false,
     options: {
@@ -1703,7 +1705,11 @@ async function openModal(): Promise<void> {
     }
 
     const cache = document.createElement("span");
-    cache.textContent = `${state.cachedCount} from cache`;
+    cache.textContent = `${state.cachedCount + state.sharedCachedCount} from cache`;
+
+    if (state.sharedCachedCount > 0) {
+      cache.title = `${state.sharedCachedCount} came from the shared cache server`;
+    }
     footer.append(cache);
 
     if (state.rateLimit) {
@@ -1797,6 +1803,7 @@ async function openModal(): Promise<void> {
       state.metadata = result.metadata;
       state.missing = result.missing;
       state.cachedCount = result.cachedCount;
+      state.sharedCachedCount = result.sharedCachedCount;
       state.rateLimit = result.rateLimit;
       showMain();
     } catch (error) {

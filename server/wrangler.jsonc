@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "awesomer-lists-cache",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-01",
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      // Replace with the id printed by:
+      //   npx wrangler kv namespace create CACHE
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ]
+}

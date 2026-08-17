@@ -9,6 +9,11 @@
     "https://api.github.com/*",
     "https://raw.githubusercontent.com/*"
   ],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*"],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
   "web_accessible_resources": [
     {
       "resources": ["fonts/*.woff2", "token.html"],
