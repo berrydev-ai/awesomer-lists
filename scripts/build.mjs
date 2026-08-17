@@ -1,45 +1,67 @@
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { build } from "esbuild";
 
+import { readCacheServerUrl } from "./cache-server-url.mjs";
+
 const root = resolve(import.meta.dirname, "..");
 const outputDirectory = resolve(root, "dist");
+const cacheServerUrl = readCacheServerUrl(process.env.AWESOMER_CACHE_SERVER_URL);
 
 await rm(outputDirectory, { recursive: true, force: true });
 await mkdir(outputDirectory, { recursive: true });
 
+const shared = {
+  bundle: true,
+  platform: "browser",
+  target: "chrome114",
+  legalComments: "none",
+  define: {
+    __AWESOMER_CACHE_SERVER_URL__: JSON.stringify(cacheServerUrl),
+  },
+};
+
 await Promise.all([
   build({
+    ...shared,
     entryPoints: [resolve(root, "src/background.ts")],
     outfile: resolve(outputDirectory, "background.js"),
-    bundle: true,
     format: "esm",
-    platform: "browser",
-    target: "chrome114",
-    legalComments: "none",
   }),
   build({
+    ...shared,
     entryPoints: [resolve(root, "src/content.ts")],
     outfile: resolve(outputDirectory, "content.js"),
-    bundle: true,
     format: "iife",
-    platform: "browser",
-    target: "chrome114",
-    legalComments: "none",
   }),
   build({
+    ...shared,
     entryPoints: [resolve(root, "src/token.ts")],
     outfile: resolve(outputDirectory, "token.js"),
-    bundle: true,
     format: "esm",
-    platform: "browser",
-    target: "chrome114",
-    legalComments: "none",
+  }),
+  build({
+    ...shared,
+    entryPoints: [resolve(root, "src/options.ts")],
+    outfile: resolve(outputDirectory, "options.js"),
+    format: "esm",
   }),
 ]);
 
 await cp(resolve(root, "public"), outputDirectory, { recursive: true });
+
+const manifestPath = resolve(outputDirectory, "manifest.json");
+const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+
+if (cacheServerUrl) {
+  manifest.host_permissions = [
+    ...manifest.host_permissions,
+    `${new URL(cacheServerUrl).origin}/*`,
+  ];
+}
+
+await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 const fontFiles = [
   ["@fontsource/geist", "geist-latin-400-normal.woff2"],

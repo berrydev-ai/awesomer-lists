@@ -8,11 +8,23 @@ import {
   validateGitHubToken,
 } from "./github/client";
 import type { RateLimitInfo } from "./github/graphql";
+import {
+  lookupSharedMetadata,
+  publishSharedMetadata,
+} from "./server-cache/client";
+import {
+  SHARED_CACHE_SETTINGS_KEY,
+  normalizeCacheServerUrl,
+  resolveSharedCache,
+  type ResolvedSharedCache,
+} from "./server-cache/config";
+import { SHARED_CACHE_TTL_MILLISECONDS } from "./server-cache/payload";
 import type {
   AuthStatus,
   ExtensionRequest,
   ExtensionResponse,
   MetadataLoadResult,
+  SharedCacheStatus,
 } from "./messages";
 
 const LOCAL_TOKEN_KEY = "auth.githubToken";
@@ -191,21 +203,77 @@ async function readCachedMetadata(
   return metadata;
 }
 
+async function getSharedCache(): Promise<ResolvedSharedCache> {
+  await storageReady;
+  const stored = await chrome.storage.local.get(SHARED_CACHE_SETTINGS_KEY);
+  return resolveSharedCache(stored[SHARED_CACHE_SETTINGS_KEY]);
+}
+
+async function saveSharedCache(
+  serverUrl: string,
+  enabled: boolean,
+): Promise<SharedCacheStatus> {
+  await storageReady;
+  const normalized = normalizeCacheServerUrl(serverUrl);
+  await chrome.storage.local.set({
+    [SHARED_CACHE_SETTINGS_KEY]: { serverUrl: normalized, enabled },
+  });
+  return getSharedCache();
+}
+
+/**
+ * Records live in the local cache for six hours, but never past the seven-day
+ * deadline the shared cache applies, so a record copied from the shared server
+ * cannot quietly outlive it here.
+ */
+function localExpiry(item: RepositoryMetadata, now: number): number {
+  const fetchedAt = Date.parse(item.fetchedAt);
+  const sharedDeadline = Number.isNaN(fetchedAt)
+    ? Number.POSITIVE_INFINITY
+    : fetchedAt + SHARED_CACHE_TTL_MILLISECONDS;
+
+  return Math.min(now + CACHE_TTL_MILLISECONDS, sharedDeadline);
+}
+
 async function writeCachedMetadata(
   metadata: readonly RepositoryMetadata[],
 ): Promise<void> {
+  if (metadata.length === 0) return;
+
   await storageReady;
-  const expiresAt = Date.now() + CACHE_TTL_MILLISECONDS;
+  const now = Date.now();
   const values = Object.fromEntries(
     metadata.map((item) => [
       cacheKey(item.nameWithOwner),
-      { value: item, expiresAt } satisfies CachedMetadata,
+      { value: item, expiresAt: localExpiry(item, now) } satisfies CachedMetadata,
     ]),
   );
 
-  if (metadata.length > 0) {
-    await chrome.storage.local.set(values);
+  await chrome.storage.local.set(values);
+}
+
+/**
+ * Asks the shared cache server about repositories this device does not already
+ * know. A missing, slow, or broken server simply yields no entries.
+ */
+async function readSharedMetadata(
+  serverUrl: string,
+  repositories: readonly RepositoryRef[],
+): Promise<Map<string, RepositoryMetadata>> {
+  const shared = new Map<string, RepositoryMetadata>();
+
+  if (!serverUrl || repositories.length === 0) return shared;
+
+  const records = await lookupSharedMetadata(
+    serverUrl,
+    repositories.map((repository) => repository.nameWithOwner),
+  );
+
+  for (const record of records) {
+    shared.set(record.nameWithOwner.toLowerCase(), record);
   }
+
+  return shared;
 }
 
 async function loadMetadata(
@@ -222,11 +290,18 @@ async function loadMetadata(
   }
 
   const repositories = normalizeRepositoryNames(values, MAX_REPOSITORIES);
+  const sharedCache = await getSharedCache();
   const cached = refresh
     ? new Map<string, RepositoryMetadata>()
     : await readCachedMetadata(repositories);
-  const toFetch = repositories.filter(
+  const afterLocal = repositories.filter(
     (repository) => !cached.has(repository.nameWithOwner.toLowerCase()),
+  );
+  const shared = refresh
+    ? new Map<string, RepositoryMetadata>()
+    : await readSharedMetadata(sharedCache.activeUrl, afterLocal);
+  const toFetch = afterLocal.filter(
+    (repository) => !shared.has(repository.nameWithOwner.toLowerCase()),
   );
   const loaded: RepositoryMetadata[] = [];
   const missing: string[] = [];
@@ -240,10 +315,15 @@ async function loadMetadata(
     rateLimit = result.rateLimit ?? rateLimit;
   }
 
-  await writeCachedMetadata(loaded);
+  await writeCachedMetadata([...loaded, ...shared.values()]);
+
+  if (sharedCache.activeUrl && loaded.length > 0) {
+    await publishSharedMetadata(sharedCache.activeUrl, loaded);
+  }
 
   const byRepository = new Map<string, RepositoryMetadata>([
     ...cached.entries(),
+    ...shared.entries(),
     ...loaded.map((item) => [item.nameWithOwner.toLowerCase(), item] as const),
   ]);
 
@@ -255,6 +335,7 @@ async function loadMetadata(
     missing,
     rateLimit,
     cachedCount: cached.size,
+    sharedCachedCount: shared.size,
   };
 }
 
@@ -269,6 +350,16 @@ const requestHandlers = {
       throw new Error("Invalid token settings.");
     }
     return saveToken(request.token, request.remember);
+  },
+  "cache.status": async () => getSharedCache(),
+  "cache.save": async (request) => {
+    if (
+      typeof request.serverUrl !== "string" ||
+      typeof request.enabled !== "boolean"
+    ) {
+      throw new Error("Invalid shared cache settings.");
+    }
+    return saveSharedCache(request.serverUrl, request.enabled);
   },
   "readme.load": async (request) => {
     if (

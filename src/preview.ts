@@ -3,6 +3,7 @@ import type {
   ExtensionRequest,
   ExtensionResponse,
   MetadataLoadResult,
+  SharedCacheStatus,
 } from "./messages";
 import type { PreviewConfig } from "./preview-config";
 import {
@@ -110,6 +111,15 @@ async function handlePreviewRequest(
 
   if (request.type === "readme.load") return success(PREVIEW_MARKDOWN);
 
+  if (request.type === "cache.status" || request.type === "cache.save") {
+    return success<SharedCacheStatus>({
+      serverUrl: "",
+      enabled: true,
+      builtInUrl: "https://cache.example.com",
+      activeUrl: "https://cache.example.com",
+    });
+  }
+
   const requested = new Set(
     request.repositories.map((repository) => repository.toLocaleLowerCase()),
   );
@@ -123,6 +133,7 @@ async function handlePreviewRequest(
       resetAt: "2026-07-10T14:32:33Z",
     },
     cachedCount: request.refresh ? 0 : 2,
+    sharedCachedCount: request.refresh ? 0 : 1,
   };
   return success(result);
 }

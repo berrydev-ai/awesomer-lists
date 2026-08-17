@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["chrome", "vitest/globals"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "server/src/**/*.ts"]
 }
