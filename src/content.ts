@@ -262,7 +262,7 @@ const STYLES = `
 
   .toolbar {
     display: grid;
-    grid-template-columns: minmax(260px, 1fr) auto auto auto;
+    grid-template-columns: minmax(260px, 1fr) auto auto;
     align-items: end;
     gap: 12px;
     padding: 14px 18px;
@@ -281,7 +281,6 @@ const STYLES = `
   }
   .search-input, .select-input { width: 100%; min-height: 38px; padding: 7px 10px; }
   .toolbar-check { align-self: center; margin: 17px 0 0; white-space: nowrap; }
-  .refresh-button { min-height: 38px; }
 
   .table-wrap { min-height: 0; overflow: auto; background: white; }
   .table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
@@ -630,7 +629,7 @@ const REDESIGN_STYLES = `
   .settings-form { display: grid; gap: 7px; }
   .settings-form label { color: var(--text-muted); font-size: 12px; }
   .settings-note { margin: 0; color: var(--text-faint); font-size: 11px; line-height: 1.45; }
-  .settings-actions { display: flex; align-items: center; gap: 8px; }
+  .settings-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
   .token-frame { width: 100%; height: 208px; border: 0; background: transparent; }
   .appearance-control { display: grid; gap: 7px; margin-top: 12px; }
   .appearance-control > span { color: var(--text-muted); font-size: 12px; }
@@ -722,7 +721,6 @@ const REDESIGN_STYLES = `
   .select-input { height: 38px; min-width: 138px; padding: 0 12px; font-size: 13px; }
   .toolbar-check { height: 38px; margin: 0; align-items: center; color: var(--text-muted); }
   .toolbar-check input { accent-color: var(--accent); }
-  .refresh-button { height: 38px; min-height: 38px; padding: 0 14px; white-space: nowrap; }
   .maintenance-bar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
   .maintenance-chip, .toggle-groups {
     display: inline-flex;
@@ -1086,6 +1084,13 @@ async function openModal(): Promise<void> {
             <p class="settings-note">Token entry opens in an extension-owned frame. Use a dedicated, read-only token; write permissions are not needed.</p>
           </div>
           <div class="settings-section">
+            <div class="eyebrow">Data</div>
+            <div class="settings-actions">
+              <button class="compact-button" id="refresh-button" type="button">↻ Refresh data</button>
+            </div>
+            <p class="settings-note">Skips the cached metadata and re-reads stars, commits, issues, and licenses from GitHub.</p>
+          </div>
+          <div class="settings-section">
             <div class="eyebrow">Appearance</div>
             <div class="appearance-control">
               <span>Theme</span>
@@ -1181,7 +1186,6 @@ async function openModal(): Promise<void> {
                   <input id="hide-archived" type="checkbox">
                   <span>Hide archived</span>
                 </label>
-                <button class="secondary-button refresh-button" id="refresh-button" type="button">↻ Refresh data</button>
               </div>
               <div class="maintenance-bar">
                 <span class="toolbar-label">Maintenance</span>
@@ -1911,7 +1915,10 @@ async function openModal(): Promise<void> {
   );
   requiredElement<HTMLButtonElement>(shadow, "#refresh-button").addEventListener(
     "click",
-    () => void loadData(true),
+    () => {
+      setSettingsOpen(false);
+      void loadData(true);
+    },
   );
 
   cancelAuth.addEventListener("click", showMain);

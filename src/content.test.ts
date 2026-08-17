@@ -272,6 +272,37 @@ describe("content modal workflow", () => {
     );
     expect(document.getElementById("awesomer-lists-extension-root")).toBeNull();
   });
+
+  it("refreshes data from the settings panel", async () => {
+    connected = true;
+    contentListener?.({ type: "awesomer.toggle" });
+
+    const shadow = await waitUntil(() => modalShadowRoot);
+    await waitUntil(() => shadow.querySelector(".project-row"));
+
+    const settingsPanel = shadow.querySelector<HTMLElement>("#settings-panel");
+    const refreshButton = shadow.querySelector<HTMLButtonElement>(
+      "#refresh-button",
+    );
+    if (!settingsPanel || !refreshButton) {
+      throw new Error("The settings refresh control was not rendered.");
+    }
+
+    expect(shadow.querySelector(".toolbar #refresh-button")).toBeNull();
+    expect(settingsPanel.contains(refreshButton)).toBe(true);
+    expect(refreshButton.className).toContain("compact-button");
+
+    shadow.querySelector<HTMLButtonElement>("#settings-button")?.click();
+    expect(settingsPanel.hidden).toBe(false);
+
+    refreshButton.click();
+    expect(settingsPanel.hidden).toBe(true);
+    await waitUntil(() =>
+      sendMessage.mock.calls.some(
+        ([request]) => request.type === "metadata.load" && request.refresh,
+      ) || null,
+    );
+  });
 });
 
 async function waitUntil<T>(read: () => T | null): Promise<T> {
