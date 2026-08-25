@@ -2,6 +2,8 @@
 
 Awesomer Lists is a Chrome extension for turning a GitHub Awesome list into a sortable, grouped project table.
 
+<img width="1188" height="857" alt="CleanShot 2026-08-25 at 12 04 52" src="https://github.com/user-attachments/assets/1fa638cc-3448-4788-8cc4-faa184686c44" />
+
 ## What it shows
 
 - Stars and forks
