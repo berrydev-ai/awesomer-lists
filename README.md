@@ -104,6 +104,8 @@ These labels are visible rules, not a hidden quality score. Stars and issue coun
 - `npm run preview` opens a browser-ready UI build at `http://127.0.0.1:4173/preview.html`.
 - `npm run check` runs all three checks.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for where code lives, the rules around the token and the shared cache, and how to open a pull request.
+
 ### Preview the UI without loading the extension
 
 Run:
@@ -115,3 +117,7 @@ npm run preview
 Then open [http://127.0.0.1:4173/preview.html](http://127.0.0.1:4173/preview.html). The preview uses a committed snapshot of public GitHub data captured on July 10, 2026. Its source URLs are recorded in `src/preview-snapshot.ts`. It does not call GitHub, require a token, or store anything. Changes to the modal source rebuild when the page is refreshed. Press `Ctrl+C` to stop the server.
 
 For automatic browser reload while editing the preview UI, run `npm run dev` instead. Changes under `src`, `preview`, or `public` rebuild the affected files and reload the open page.
+
+## License
+
+[MIT](LICENSE) © Berry Development
