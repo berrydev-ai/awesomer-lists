@@ -105,7 +105,7 @@ These labels are visible rules, not a hidden quality score. Stars and issue coun
 - `npm run dev` serves the UI preview and reloads the browser after changes.
 - `server/` is the shared cache Worker; `npx wrangler dev` inside it serves `http://localhost:8787` for a development build.
 - `npm run preview` opens a browser-ready UI build at `http://127.0.0.1:4173/preview.html`.
-- `npm run check` runs all three checks.
+- `npm run check` runs all four checks. This is what CI runs.
 - `npm run verify` checks a build in `dist` for missing files, a version mismatch, or an unexpected host permission.
 
 CI runs tests, typecheck, build, and verify on every pull request. Security reports go through [SECURITY.md](SECURITY.md), and released changes are recorded in [CHANGELOG.md](CHANGELOG.md).
