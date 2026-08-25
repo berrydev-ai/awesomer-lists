@@ -5,6 +5,33 @@ const REFERENCE_DEFINITION_PATTERN =
   /^\s*\[([^\]]+)]:\s*(?:<([^>]+)>|(\S+))/;
 const LIST_ITEM_PATTERN = /^\s*(?:[-*+]|\d+[.)])\s+(.+)$/;
 
+/**
+ * A tag, an end tag, a comment, or a doctype. The leading letter or `!` is what
+ * separates real markup from prose, so `2 < 3 and 4 > 1` survives intact where
+ * a plain `<[^>]+>` would eat it.
+ */
+const HTML_TAG_PATTERN = /<\/?[A-Za-z!][^>]*>/g;
+
+/**
+ * Removes HTML tags from Markdown that mixes prose with inline HTML.
+ *
+ * Applied until the text stops changing, because removing an inner tag can join
+ * text that then reads as a tag: one pass over `<<div>div>` leaves `div>`
+ * behind. This is a tidiness fix, not a security boundary. Everything parsed
+ * here reaches the DOM through textContent, never as HTML.
+ */
+export function stripHtmlTags(value: string): string {
+  let previous = value;
+  let stripped = previous.replace(HTML_TAG_PATTERN, "");
+
+  while (stripped !== previous) {
+    previous = stripped;
+    stripped = previous.replace(HTML_TAG_PATTERN, "");
+  }
+
+  return stripped;
+}
+
 interface ExtractedLink {
   title: string;
   url: string;
@@ -116,7 +143,7 @@ function extractLink(
 
     if (match[1] && match[2] && match.index !== undefined && !isImage) {
       links.push({
-        title: match[1],
+        title: stripHtmlTags(match[1]).trim(),
         url: match[2],
         startIndex: match.index,
         endIndex: match.index + match[0].length,
@@ -132,7 +159,7 @@ function extractLink(
 
     if (match[1] && referenceUrl && match.index !== undefined && !isImage) {
       links.push({
-        title: match[1],
+        title: stripHtmlTags(match[1]).trim(),
         url: referenceUrl,
         startIndex: match.index,
         endIndex: match.index + match[0].length,
@@ -145,7 +172,7 @@ function extractLink(
   )) {
     if (match[2] && match[3] && match.index !== undefined) {
       links.push({
-        title: match[3].replace(/<[^>]+>/g, "").trim(),
+        title: stripHtmlTags(match[3]).trim(),
         url: match[2],
         startIndex: match.index,
         endIndex: match.index + match[0].length,
@@ -167,13 +194,13 @@ function extractLink(
 }
 
 function cleanDescription(value: string): string {
-  return value
+  const withoutMarkdownLinks = value
     .replace(/^\s*[-–—:]\s*/, "")
     .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
     .replace(/\[([^\]]+)]\[[^\]]+]/g, "$1")
-    .replace(/<a\b[^>]*>(.*?)<\/a>/gi, "$1")
-    .replace(/<[^>]+>/g, "")
-    .trim();
+    .replace(/<a\b[^>]*>(.*?)<\/a>/gi, "$1");
+
+  return stripHtmlTags(withoutMarkdownLinks).trim();
 }
 
 function splitTableRow(line: string): string[] | null {

@@ -73,13 +73,13 @@ function submit(element: HTMLFormElement): void {
 describe("options page", () => {
   it("shows the server this build ships with", async () => {
     await import("./options");
-    await waitUntil(() =>
-      document.body.textContent?.includes("built-in.example.com") ? true : null,
-    );
+    const note = await waitUntil(() => {
+      const element = document.querySelector<HTMLElement>("#cache-default");
+      return element && element.textContent !== "" ? element : null;
+    });
 
-    const note = document.querySelector<HTMLElement>("#cache-default");
-    expect(note?.hidden).toBe(false);
-    expect(note?.textContent).toContain("https://built-in.example.com");
+    expect(note.hidden).toBe(false);
+    expect(note.textContent).toContain("https://built-in.example.com");
   });
 
   it("asks Chrome for access before saving a server URL", async () => {

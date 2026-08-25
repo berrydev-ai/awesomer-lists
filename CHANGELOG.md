@@ -42,5 +42,9 @@ version.
 - Awesome lists that lay projects out in Markdown tables are parsed, and
   repositories that no longer exist are skipped instead of failing the load.
 - Project counts stay unique, and totals and sources match what GitHub returns.
+- Angle brackets in prose survive. A description reading `A C++ <-> Lua API
+  wrapper` kept its arrow instead of losing it as though it were a tag.
+- Inline HTML in a project name is removed, so a title written as
+  `<b>Name</b>` shows as `Name`, matching how anchor titles already behaved.
 
 [unreleased]: https://github.com/berrydev-ai/awesomer-lists/commits/main

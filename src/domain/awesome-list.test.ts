@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseAwesomeList } from "./awesome-list";
+import { parseAwesomeList, stripHtmlTags } from "./awesome-list";
 
 describe("parseAwesomeList", () => {
   it("turns a linked project into a row under its full heading path", () => {
@@ -151,5 +151,61 @@ describe("parseAwesomeList", () => {
         sectionPath: ["Feature Dimensions", "Sidebar & Status Pills"],
       }),
     ]);
+  });
+
+  it("keeps an arrow in a description instead of eating it as a tag", () => {
+    const markdown = `# Awesome C++
+
+## Scripting
+
+- [sol2](https://github.com/ThePhD/sol2) - A C++ <-> Lua API wrapper.
+`;
+
+    expect(parseAwesomeList(markdown)).toEqual([
+      expect.objectContaining({
+        title: "sol2",
+        description: "A C++ <-> Lua API wrapper.",
+      }),
+    ]);
+  });
+
+  it("leaves no tag text behind when HTML tags are nested inside each other", () => {
+    const markdown = `# Awesome Agents
+
+## Tools
+
+- [<span><b>Tricky</b></span> Name](https://github.com/acme/tricky) - A <<div>div>description with <em>markup</em>.
+`;
+
+    expect(parseAwesomeList(markdown)).toEqual([
+      expect.objectContaining({
+        title: "Tricky Name",
+        description: "A description with markup.",
+        repository: expect.objectContaining({ nameWithOwner: "acme/tricky" }),
+      }),
+    ]);
+  });
+});
+
+describe("stripHtmlTags", () => {
+  it("removes ordinary inline tags", () => {
+    expect(stripHtmlTags("plain <b>bold</b> text")).toBe("plain bold text");
+  });
+
+  it("removes tag text that only becomes a tag after an inner tag is taken out", () => {
+    expect(stripHtmlTags("<<div>div>leftover")).toBe("leftover");
+  });
+
+  it("keeps text a browser would also keep from malformed markup", () => {
+    // A browser renders this as "href>text" too: the stray href> is content.
+    expect(stripHtmlTags("<a <b>href>text")).toBe("href>text");
+  });
+
+  it("leaves text that merely contains angle brackets", () => {
+    expect(stripHtmlTags("2 < 3 and 4 > 1")).toBe("2 < 3 and 4 > 1");
+    // From awesome-cpp: the arrow is prose, not markup.
+    expect(stripHtmlTags("A C++ <-> Lua API wrapper")).toBe(
+      "A C++ <-> Lua API wrapper",
+    );
   });
 });
