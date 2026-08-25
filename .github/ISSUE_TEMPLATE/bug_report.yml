@@ -1,0 +1,94 @@
+name: Bug report
+description: Something in the extension does not work as described
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste a GitHub token, a screenshot showing one, or anything else
+        secret. If this is a security problem, close this and report it through
+        [a private advisory](https://github.com/berrydev-ai/awesomer-lists/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1. Open the list at https://github.com/...
+        2. Click the Awesomer Lists button
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: list-url
+    attributes:
+      label: Which list
+      description: The URL of the Awesome list or Markdown file you opened.
+      placeholder: https://github.com/sindresorhus/awesome
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where it happens
+      options:
+        - The table, sorting, or filters
+        - Reading the list README
+        - The token prompt or options page
+        - The shared cache
+        - Building or installing the extension
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: chrome-version
+    attributes:
+      label: Chrome version
+      description: From chrome://version. Minimum supported is 114.
+      placeholder: "141.0.7390.55"
+    validations:
+      required: true
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+      description: From chrome://extensions, on the Awesomer Lists card.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Errors from the console
+      description: >
+        Right-click the page, choose Inspect, open Console. For background
+        errors use the service worker link on the extension card. Paste
+        anything red. This is recorded as a code block, so no backticks needed.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: There is no token or other secret anywhere in this report.
+          required: true

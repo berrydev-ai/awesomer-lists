@@ -6,12 +6,13 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "npm run test && npm run typecheck && npm run build",
+    "check": "npm run test && npm run typecheck && npm run build && npm run verify",
     "dev": "node scripts/preview.mjs --hot",
     "preview": "node scripts/preview.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify": "node scripts/check-dist.mjs"
   },
   "devDependencies": {
     "@fontsource/geist": "5.2.9",

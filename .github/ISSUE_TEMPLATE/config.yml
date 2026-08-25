@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea to talk through
+    url: https://github.com/berrydev-ai/awesomer-lists/discussions
+    about: Ask how something works, or float an idea before opening an issue.
+  - name: Report a security vulnerability
+    url: https://github.com/berrydev-ai/awesomer-lists/security/advisories/new
+    about: Report privately. Never open a public issue for a security problem.
+  - name: How to build and contribute
+    url: https://github.com/berrydev-ai/awesomer-lists/blob/main/CONTRIBUTING.md
+    about: Setup, project layout, and the rules around tokens and the shared cache.

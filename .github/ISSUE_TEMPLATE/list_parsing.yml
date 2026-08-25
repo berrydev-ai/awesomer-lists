@@ -1,0 +1,64 @@
+name: A list parsed incorrectly
+description: Projects, sections, or counts came out wrong for a specific list
+title: "parse: "
+labels: ["bug", "parsing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Awesome lists vary a lot. Bullets, tables, nested headings, and odd
+        link shapes all appear in the wild. A link to the exact list is the
+        single most useful thing in this report.
+
+  - type: input
+    id: list-url
+    attributes:
+      label: The list
+      description: The exact URL you opened, including the file if it was not the root README.
+      placeholder: https://github.com/owner/awesome-thing
+    validations:
+      required: true
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What went wrong
+      options:
+        - Projects are missing
+        - Extra rows that are not projects
+        - Projects landed in the wrong section
+        - Section names or nesting are wrong
+        - Descriptions are wrong or empty
+        - Stars, issues, commits, or license are wrong
+        - The maintenance label looks wrong
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it should have shown
+      description: >
+        Name a specific row or section, for example: "Foo Bar should be under
+        Tooling › Linters but shows as ungrouped."
+    validations:
+      required: true
+
+  - type: textarea
+    id: markdown
+    attributes:
+      label: The Markdown involved
+      description: >
+        Paste the few README lines that produced the wrong result, if you can
+        find them. This is recorded as a code block already.
+      render: markdown
+    validations:
+      required: false
+
+  - type: input
+    id: counts
+    attributes:
+      label: Project count shown in the footer
+      placeholder: "312 projects"
+    validations:
+      required: false

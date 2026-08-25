@@ -1,5 +1,8 @@
 # Awesomer Lists
 
+[![CI](https://github.com/berrydev-ai/awesomer-lists/actions/workflows/ci.yml/badge.svg)](https://github.com/berrydev-ai/awesomer-lists/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Awesomer Lists is a Chrome extension for turning a GitHub Awesome list into a sortable, grouped project table.
 
 <img width="1188" height="857" alt="CleanShot 2026-08-25 at 12 04 52" src="https://github.com/user-attachments/assets/1fa638cc-3448-4788-8cc4-faa184686c44" />
@@ -103,6 +106,9 @@ These labels are visible rules, not a hidden quality score. Stars and issue coun
 - `server/` is the shared cache Worker; `npx wrangler dev` inside it serves `http://localhost:8787` for a development build.
 - `npm run preview` opens a browser-ready UI build at `http://127.0.0.1:4173/preview.html`.
 - `npm run check` runs all three checks.
+- `npm run verify` checks a build in `dist` for missing files, a version mismatch, or an unexpected host permission.
+
+CI runs tests, typecheck, build, and verify on every pull request. Security reports go through [SECURITY.md](SECURITY.md), and released changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for where code lives, the rules around the token and the shared cache, and how to open a pull request.
 

@@ -13,7 +13,7 @@ npm install
 npm run check
 ```
 
-`npm run check` runs the tests, the type check, and the build. It should pass before you change anything.
+`npm run check` runs the tests, the type check, the build, and a check of the built extension. It should pass before you change anything. Node 24 is what CI uses and what `.nvmrc` pins.
 
 To try your build in Chrome:
 
@@ -29,9 +29,10 @@ For UI work you usually do not need the extension at all. Run `npm run dev` and 
 - `npm test` runs behavior tests. `npm run test:watch` keeps them running.
 - `npm run typecheck` checks TypeScript.
 - `npm run build` writes the unpacked extension to `dist`.
+- `npm run verify` checks that build for missing files, a version mismatch, or an unexpected host permission.
 - `npm run dev` serves the UI preview with browser reload.
 - `npm run preview` serves the same preview without reload.
-- `npm run check` runs tests, type check, and build together.
+- `npm run check` runs tests, type check, build, and verify together. This is what CI runs.
 - `npx wrangler dev` inside `server/` serves the shared cache Worker at `http://localhost:8787`.
 
 ## Where code lives
@@ -46,6 +47,7 @@ For UI work you usually do not need the extension at all. Run `npm run dev` and 
 | `public/`           | `manifest.json` and static extension pages                              |
 | `scripts/`          | Build and preview scripts                                               |
 | `server/`           | The Cloudflare Worker for the shared cache                              |
+| `.github/`          | CI, the release workflow, and issue and pull request templates          |
 
 Tests sit next to the file they cover, as `name.test.ts`.
 
@@ -80,6 +82,22 @@ Found a vulnerability? Do not open a public issue. Report it privately through [
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org), as in `feat(ui): move refresh data into the settings panel` and `fix: parse tables and skip missing repositories`. Common scopes here are `extension`, `ui`, `dev`, and `server`.
 
 In the pull request, describe what changed and why, note anything a reviewer should click through in the extension or the preview, and confirm `npm run check` passes. Update the README when behavior, permissions, or commands change.
+
+Add an entry to `CHANGELOG.md` under **Unreleased** for anything a user would notice. Internal-only changes do not need one.
+
+CI runs `npm ci`, the tests, the type check, the build, and `npm run verify` on Node 24, then uploads the unpacked extension as a build artifact you can download from the run and load in Chrome. CodeQL runs on the same pull request.
+
+## Releasing
+
+For maintainers.
+
+1. Move the **Unreleased** entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading.
+2. Set the same version in `package.json` and `public/manifest.json`. They must match, and the release fails if they do not.
+3. Commit as `chore(release): vX.Y.Z`, then tag with `git tag vX.Y.Z` and push the tag.
+4. The release workflow runs the full check, verifies the built extension, zips `dist`, and opens a **draft** release with generated notes.
+5. Review the draft, then publish it.
+
+The release is a draft on purpose, so a bad build never becomes a published download.
 
 ## License
 

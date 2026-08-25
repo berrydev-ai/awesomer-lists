@@ -1,0 +1,55 @@
+name: Feature request
+description: Suggest something the extension should do
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Awesomer Lists turns a GitHub Awesome list into a sortable, grouped
+        table. It has no analytics, and a token is sent only to
+        `api.github.com`. Ideas that fit inside those limits move fastest.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like instead
+      description: Describe the behavior. Screenshots or sketches help.
+    validations:
+      required: true
+
+  - type: input
+    id: example-list
+    attributes:
+      label: A list where this matters
+      placeholder: https://github.com/sindresorhus/awesome
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you have tried
+      description: Other tools, workarounds, or approaches you already ruled out.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This needs no analytics and no third-party service.
+          required: false
+        - label: This needs no new permission beyond what the extension already asks for.
+          required: false
+        - label: I searched existing issues for this idea.
+          required: true
