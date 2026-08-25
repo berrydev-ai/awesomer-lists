@@ -21,13 +21,13 @@ const HTML_TAG_PATTERN = /<\/?[A-Za-z!][^>]*>/g;
  * here reaches the DOM through textContent, never as HTML.
  */
 export function stripHtmlTags(value: string): string {
-  let previous = value;
-  let stripped = previous.replace(HTML_TAG_PATTERN, "");
+  let stripped = value;
+  let previous: string;
 
-  while (stripped !== previous) {
+  do {
     previous = stripped;
     stripped = previous.replace(HTML_TAG_PATTERN, "");
-  }
+  } while (stripped !== previous);
 
   return stripped;
 }

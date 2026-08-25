@@ -196,6 +196,12 @@ describe("stripHtmlTags", () => {
     expect(stripHtmlTags("<<div>div>leftover")).toBe("leftover");
   });
 
+  it("leaves no tag behind when tags are nested to hide them", () => {
+    expect(stripHtmlTags("<<script>script>alert(1)<</script>/script>")).toBe(
+      "alert(1)",
+    );
+  });
+
   it("keeps text a browser would also keep from malformed markup", () => {
     // A browser renders this as "href>text" too: the stray href> is content.
     expect(stripHtmlTags("<a <b>href>text")).toBe("href>text");
