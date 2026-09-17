@@ -903,7 +903,6 @@ export function createMetadataService(
       warning = combineWarning(warning, activePause.warning);
       if (activePause.retryAt) {
         warning = combineWarning(warning, rateLimitWarning(activePause.retryAt));
-        rateLimited = true;
         break;
       }
       const batch = toFetch.slice(index, index + BATCH_SIZE);
