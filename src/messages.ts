@@ -13,7 +13,7 @@ export type ExtensionRequest =
       refresh: boolean;
     }
   | { type: "cache.status" }
-  | { type: "cache.save"; serverUrl: string; enabled: boolean };
+  | { type: "cache.clear" };
 
 export interface AuthStatus {
   hasToken: boolean;
@@ -21,23 +21,27 @@ export interface AuthStatus {
   login: string | null;
 }
 
-export interface SharedCacheStatus {
-  /** The stored override, empty when the built-in server is in use. */
-  serverUrl: string;
-  enabled: boolean;
-  builtInUrl: string;
-  activeUrl: string;
+export interface LocalCacheStatus {
+  entries: number;
+  bytes: number;
+  maxBytes: number;
+  freshHours: number;
+  retentionDays: number;
 }
 
 export interface MetadataLoadResult {
   metadata: RepositoryMetadata[];
   missing: string[];
   rateLimit: RateLimitInfo | null;
-  /** Repositories answered from this device's own six-hour cache. */
+  /** Repositories answered from this device's cache, including older records. */
   cachedCount: number;
-  /** Repositories answered by the shared cache server. */
-  sharedCachedCount: number;
+  staleCount: number;
+  pendingCount: number;
+  complete: boolean;
+  warning: string | null;
 }
+
+export const METADATA_PORT_NAME = "awesomer.metadata";
 
 export type ExtensionResponse<T> =
   | { ok: true; data: T }

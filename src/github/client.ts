@@ -7,6 +7,7 @@ import {
 
 const GRAPHQL_ENDPOINT = "https://api.github.com/graphql";
 const REST_API_VERSION = "2026-03-10";
+const REQUEST_TIMEOUT_MILLISECONDS = 15_000;
 
 export type GitHubErrorCode =
   | "AUTH_REQUIRED"
@@ -16,6 +17,8 @@ export type GitHubErrorCode =
 
 export interface GitHubClientError extends Error {
   code: GitHubErrorCode;
+  /** Epoch milliseconds when GitHub says another request can be attempted. */
+  retryAt?: number;
 }
 
 export interface ReadmeRequestOptions {
@@ -32,8 +35,12 @@ interface GraphqlResponseError {
 function createClientError(
   code: GitHubErrorCode,
   message: string,
+  retryAt?: number,
 ): GitHubClientError {
-  return Object.assign(new Error(message), { code });
+  return Object.assign(
+    new Error(message),
+    retryAt === undefined ? { code } : { code, retryAt },
+  );
 }
 
 /**
@@ -62,8 +69,66 @@ function authorizationHeaders(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token.trim()}` };
 }
 
+function responseRetryAt(response: Response): number | undefined {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter !== null) {
+    const seconds = Number(retryAfter);
+    if (retryAfter.trim() && Number.isFinite(seconds) && seconds >= 0) {
+      return Date.now() + seconds * 1_000;
+    }
+    const timestamp = Date.parse(retryAfter);
+    return Number.isFinite(timestamp) ? timestamp : undefined;
+  }
+
+  if (response.headers.get("x-ratelimit-remaining") !== "0") {
+    return undefined;
+  }
+
+  const resetSeconds = Number(response.headers.get("x-ratelimit-reset"));
+  return Number.isFinite(resetSeconds) && resetSeconds > 0
+    ? resetSeconds * 1_000
+    : undefined;
+}
+
+async function fetchWithTimeout<T>(
+  fetchImplementation: typeof fetch,
+  input: string,
+  init: RequestInit,
+  consume: (response: Response) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutError = createClientError(
+    "GITHUB_ERROR",
+    "GitHub did not respond before the request timed out.",
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      (async () => {
+        const response = await fetchImplementation(input, {
+          ...init,
+          signal: controller.signal,
+        });
+        await assertSuccessfulResponse(response);
+        return consume(response);
+      })(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(timeoutError);
+        }, REQUEST_TIMEOUT_MILLISECONDS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 async function assertSuccessfulResponse(response: Response): Promise<void> {
   if (response.ok) return;
+
+  const body = await response.text();
 
   if (response.status === 401) {
     throw createClientError(
@@ -72,10 +137,26 @@ async function assertSuccessfulResponse(response: Response): Promise<void> {
     );
   }
 
-  if (response.status === 403 || response.status === 429) {
+  let message = body;
+  try {
+    const parsed = JSON.parse(body) as { message?: unknown };
+    message = typeof parsed.message === "string" ? parsed.message : "";
+  } catch {
+    // GitHub can return plain text. Inspect it without exposing it to callers.
+  }
+
+  const rateLimited =
+    response.status === 429 ||
+    (response.status === 403 &&
+      (response.headers.get("x-ratelimit-remaining") === "0" ||
+        response.headers.has("retry-after") ||
+        /rate limit/i.test(message)));
+
+  if (rateLimited) {
     throw createClientError(
       "RATE_LIMITED",
       "GitHub is rate limiting this token. Wait for the reset time and retry.",
+      responseRetryAt(response),
     );
   }
 
@@ -145,17 +226,19 @@ export async function validateGitHubToken(
   token: string,
   fetchImplementation: typeof fetch = fetch,
 ): Promise<string> {
-  const response = await fetchImplementation(GRAPHQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      ...authorizationHeaders(token),
-      "Content-Type": "application/json",
+  const payload: unknown = await fetchWithTimeout(
+    fetchImplementation,
+    GRAPHQL_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        ...authorizationHeaders(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: "query TokenCheck { viewer { login } }" }),
     },
-    body: JSON.stringify({ query: "query TokenCheck { viewer { login } }" }),
-  });
-  await assertSuccessfulResponse(response);
-
-  const payload: unknown = await response.json();
+    (response) => response.json(),
+  );
   const errors = readGraphqlErrors(payload);
 
   if (errors.length > 0) {
@@ -194,23 +277,27 @@ export async function fetchRepositoryReadme(
   const fetchImplementation = options.fetchImplementation ?? fetch;
 
   if (options.sourceUrl) {
-    const response = await fetchImplementation(options.sourceUrl, {
-      headers: { Accept: "text/plain" },
-    });
-    await assertSuccessfulResponse(response);
-    return response.text();
+    return fetchWithTimeout(
+      fetchImplementation,
+      options.sourceUrl,
+      { headers: { Accept: "text/plain" } },
+      (response) => response.text(),
+    );
   }
 
   const endpoint = `https://api.github.com/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/readme`;
-  const response = await fetchImplementation(endpoint, {
-    headers: {
-      ...authorizationHeaders(token),
-      Accept: "application/vnd.github.raw+json",
-      "X-GitHub-Api-Version": REST_API_VERSION,
+  return fetchWithTimeout(
+    fetchImplementation,
+    endpoint,
+    {
+      headers: {
+        ...authorizationHeaders(token),
+        Accept: "application/vnd.github.raw+json",
+        "X-GitHub-Api-Version": REST_API_VERSION,
+      },
     },
-  });
-  await assertSuccessfulResponse(response);
-  return response.text();
+    (response) => response.text(),
+  );
 }
 
 /**
@@ -222,26 +309,44 @@ export async function fetchRepositoryMetadataBatch(
   fetchImplementation: typeof fetch = fetch,
 ): Promise<ParsedMetadataResponse> {
   const request = buildRepositoryMetadataQuery(repositories);
-  const response = await fetchImplementation(GRAPHQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      ...authorizationHeaders(token),
-      "Content-Type": "application/json",
+  const payload: unknown = await fetchWithTimeout(
+    fetchImplementation,
+    GRAPHQL_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        ...authorizationHeaders(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
     },
-    body: JSON.stringify(request),
-  });
-  await assertSuccessfulResponse(response);
-
-  const payload: unknown = await response.json();
+    (response) => response.json(),
+  );
   const errors = readGraphqlErrors(payload);
   const fatalError = errors.find(
     (error) => !isMissingRepositoryError(error, payload),
   );
 
   if (fatalError) {
+    const rateLimit =
+      typeof payload === "object" &&
+      payload !== null &&
+      "data" in payload &&
+      typeof payload.data === "object" &&
+      payload.data !== null &&
+      "rateLimit" in payload.data &&
+      typeof payload.data.rateLimit === "object" &&
+      payload.data.rateLimit !== null &&
+      "resetAt" in payload.data.rateLimit &&
+      typeof payload.data.rateLimit.resetAt === "string"
+        ? Date.parse(payload.data.rateLimit.resetAt)
+        : Number.NaN;
     throw createClientError(
-      "GITHUB_ERROR",
+      fatalError.type === "RATE_LIMITED" ? "RATE_LIMITED" : "GITHUB_ERROR",
       fatalError.message || "GitHub could not load repository metadata.",
+      fatalError.type === "RATE_LIMITED" && Number.isFinite(rateLimit)
+        ? rateLimit
+        : undefined,
     );
   }
 

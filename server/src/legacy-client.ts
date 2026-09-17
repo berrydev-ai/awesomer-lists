@@ -1,10 +1,10 @@
-import type { RepositoryMetadata } from "../domain/types";
+import type { RepositoryMetadata } from "../../src/domain/types";
 import {
   MAX_LOOKUP_REPOSITORIES,
   MAX_PUBLISH_RECORDS,
   acceptMetadataResponse,
   isRepositoryName,
-} from "./payload";
+} from "../../src/server-cache/payload";
 
 const LOOKUP_PATH = "/v1/metadata/lookup";
 const PUBLISH_PATH = "/v1/metadata/publish";

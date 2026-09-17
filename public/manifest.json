@@ -4,12 +4,11 @@
   "version": "0.1.0",
   "description": "Sort Awesome list projects by stars, maintenance, commits, issues, and license.",
   "minimum_chrome_version": "114",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage"],
   "host_permissions": [
     "https://api.github.com/*",
     "https://raw.githubusercontent.com/*"
   ],
-  "optional_host_permissions": ["https://*/*", "http://localhost/*"],
   "options_ui": {
     "page": "options.html",
     "open_in_tab": false

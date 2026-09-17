@@ -78,6 +78,7 @@ function optionalString(value: unknown): string | null {
 
 function parseRepository(
   value: unknown,
+  repository: RepositoryRef,
   fetchedAt: string,
 ): RepositoryMetadata | null {
   if (!isRecord(value)) return null;
@@ -103,8 +104,10 @@ function parseRepository(
   }
 
   return {
-    nameWithOwner: value.nameWithOwner,
-    url: value.url,
+    // GitHub resolves old names after a rename or transfer. Preserve the alias's
+    // requested identity because the cache and UI correlate this result by it.
+    nameWithOwner: repository.nameWithOwner,
+    url: `https://github.com/${repository.nameWithOwner}`,
     description: optionalString(value.description),
     stars: value.stargazerCount,
     forks: value.forkCount,
@@ -133,7 +136,7 @@ export function parseRepositoryMetadataResponse(
   const missing: string[] = [];
 
   repositories.forEach((repository, index) => {
-    const item = parseRepository(data[`r${index}`], fetchedAt);
+    const item = parseRepository(data[`r${index}`], repository, fetchedAt);
 
     if (item) {
       metadata.push(item);

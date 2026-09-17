@@ -4,7 +4,7 @@ import type { RepositoryMetadata } from "../../src/domain/types";
 import {
   lookupSharedMetadata,
   publishSharedMetadata,
-} from "../../src/server-cache/client";
+} from "./legacy-client";
 import {
   handleCacheRequest,
   type CacheKeyValueStore,
