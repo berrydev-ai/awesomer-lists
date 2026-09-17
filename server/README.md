@@ -1,65 +1,27 @@
-# Awesomer Lists shared cache
+# Legacy Awesomer Lists shared cache
 
-A Cloudflare Worker backed by Workers KV that stores repository metadata for
-seven days so a list one person opens loads quickly for everyone after them.
+This Cloudflare Worker remains available for older extension builds. Current Chrome and Safari builds keep metadata on each device and do not contact this service. No deployed Worker or KV namespace is changed by the browser extension update.
 
-The worker is a cache and nothing else. It holds no tokens, talks to no other
-service, and never contacts GitHub. The extension keeps using each person's own
-GitHub token for anything the cache cannot answer.
+The Worker stores contributed public repository metadata for seven days. It holds no tokens and never contacts GitHub. Older clients fetch missing data with their own tokens.
 
 ## Endpoints
 
-| Method | Path                  | Body                              | Answer                                |
-| ------ | --------------------- | --------------------------------- | ------------------------------------- |
-| `GET`  | `/health`             | —                                 | `{ "ok": true, "ttlSeconds": 604800 }` |
+| Method | Path | Body | Response |
+| --- | --- | --- | --- |
+| `GET` | `/health` | None | `{ "ok": true, "ttlSeconds": 604800 }` |
 | `POST` | `/v1/metadata/lookup` | `{ "repositories": ["owner/name"] }` | `{ "metadata": [...], "requested": n }` |
-| `POST` | `/v1/metadata/publish`| `{ "metadata": [record, ...] }`   | `{ "stored": n }`                     |
+| `POST` | `/v1/metadata/publish` | `{ "metadata": [record, ...] }` | `{ "stored": n }` |
 
-Both `POST` endpoints accept at most 500 items and a 2 MB body. Names must match
-`owner/name`; records must match the exact metadata shape in
-`src/server-cache/payload.ts`, whose validator both sides share. A lookup only
-returns entries that are still inside their seven-day window, and only for
-repositories that were asked for.
+Both POST endpoints accept at most 500 items and a 2 MB body. The validator in `src/server-cache/payload.ts` defines the shared contract. Lookup returns only requested records within their seven-day window.
 
-## Deploy
+## Existing deployments
 
-```sh
-cd server
-npx wrangler kv namespace create CACHE   # copy the printed id into wrangler.jsonc
-npx wrangler deploy
-```
+Use the configuration in `wrangler.jsonc` to maintain an existing deployment. The browser build commands no longer accept `AWESOMER_CACHE_SERVER_URL`, and the current options page has no server URL control. Do not deploy this service to use the current extension.
 
-Then build the extension against the deployed worker:
+The fixture client in `src/legacy-client.ts` preserves protocol coverage for older clients. Worker and round-trip tests still run with `npm test` from the repository root.
 
-```sh
-AWESOMER_CACHE_SERVER_URL=https://awesomer-lists-cache.<subdomain>.workers.dev npm run build
-```
+## Trust and privacy
 
-The build writes that origin into `dist/manifest.json` as a host permission, so
-no other host is reachable unless someone grants it from the options page.
+Older clients contribute cache entries. Their counters are not verified against GitHub. The validator restricts record shape and repository URLs, but a contributor can submit inaccurate public counters. Earlier extension builds offer Refresh data to fetch directly from GitHub.
 
-Run it locally with `npx wrangler dev` and point a development build at
-`http://localhost:8787`.
-
-## Trust model
-
-Entries are contributed by clients, so a determined contributor could publish
-inaccurate star or commit counts. What that buys an attacker is bounded:
-
-- Every record is re-validated against the same strict schema on read and write,
-  and `url` must equal `https://github.com/<nameWithOwner>`, so no record can
-  point the extension's links anywhere but the repository it names.
-- No token, README, or personal data is ever sent to or stored by the worker —
-  only public repository names and their public counters.
-- **Refresh data** in the extension bypasses both caches and re-reads GitHub.
-
-If exact numbers matter more than speed for your deployment, put Cloudflare
-Access or a WAF rate-limiting rule in front of `/v1/metadata/publish`, or turn
-the shared cache off in the extension's options page.
-
-## Privacy
-
-A lookup tells the worker which repository names a user is viewing. The worker
-sends no cookies (`credentials: "omit"`) and stores nothing per user, but the
-request itself is a disclosure. Anyone who does not want it can clear the server
-URL or untick **Use the shared cache** in the extension's options page.
+A lookup discloses the repository names in the request to the Worker. Requests omit cookies and tokens. The Worker stores no per-user profile. Existing operators remain responsible for deployment limits and access controls.

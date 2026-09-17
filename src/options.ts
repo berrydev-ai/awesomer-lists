@@ -1,9 +1,8 @@
 import type {
   ExtensionRequest,
   ExtensionResponse,
-  SharedCacheStatus,
+  LocalCacheStatus,
 } from "./messages";
-import { normalizeCacheServerUrl } from "./server-cache/config";
 
 document.title = "Awesomer Lists options";
 document.body.innerHTML = `
@@ -12,10 +11,8 @@ document.body.innerHTML = `
       color-scheme: light dark;
       --text: #16181d;
       --muted: #5a6070;
-      --faint: #7a8090;
       --border: rgba(0, 0, 0, .16);
-      --input: #fff;
-      --accent: #4f46e5;
+      --panel: rgba(0, 0, 0, .035);
       --danger: #b42318;
       --ok: #027a48;
     }
@@ -23,10 +20,8 @@ document.body.innerHTML = `
       :root {
         --text: #f2f3f6;
         --muted: #a8aebd;
-        --faint: #868c9c;
         --border: rgba(255, 255, 255, .18);
-        --input: #16181d;
-        --accent: #8b85f5;
+        --panel: rgba(255, 255, 255, .055);
         --danger: #f97066;
         --ok: #6ce9a6;
       }
@@ -39,71 +34,66 @@ document.body.innerHTML = `
     h1 { margin: 0 0 4px; font-size: 17px; }
     h2 { margin: 24px 0 4px; font-size: 14px; }
     p { margin: 0 0 12px; color: var(--muted); font-size: 12.5px; }
-    form { display: grid; gap: 10px; }
-    label { color: var(--muted); font-size: 12px; }
-    input[type="url"] {
-      width: 100%; height: 38px; padding: 0 11px; border: 1px solid var(--border);
-      border-radius: 8px; background: var(--input); color: var(--text);
-      font: 12.5px ui-monospace, monospace;
+    dl {
+      display: grid; grid-template-columns: 1fr auto; gap: 8px 20px;
+      margin: 12px 0; padding: 14px; border: 1px solid var(--border);
+      border-radius: 10px; background: var(--panel);
     }
-    input[type="url"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
-    .check input { accent-color: var(--accent); }
-    .actions { display: flex; align-items: center; gap: 10px; }
+    dt { color: var(--muted); }
+    dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 650; }
     button {
-      min-height: 34px; padding: 6px 14px; border: 1px solid var(--accent);
-      border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer;
+      min-height: 34px; padding: 6px 14px; border: 1px solid var(--danger);
+      border-radius: 8px; background: transparent; color: var(--danger); cursor: pointer;
       font: 600 12.5px system-ui, sans-serif;
     }
     button:disabled { cursor: wait; opacity: .58; }
-    .note { margin: 0; color: var(--faint); font-size: 11.5px; }
-    .status { margin: 0; font-size: 12.5px; font-weight: 600; }
+    .note { font-size: 11.5px; }
+    .status { margin-top: 10px; font-size: 12.5px; font-weight: 600; }
     .status[data-tone="error"] { color: var(--danger); }
     .status[data-tone="ok"] { color: var(--ok); }
     [hidden] { display: none !important; }
   </style>
   <h1>Awesomer Lists</h1>
-  <p>Your GitHub token is set from the extension window on a GitHub page, not here.</p>
+  <p>Your GitHub token is set from the extension window on a GitHub page.</p>
 
-  <h2>Shared cache</h2>
-  <p>
-    A shared cache server keeps public repository counts for seven days, so a list
-    someone already opened loads without waiting on GitHub again. Looking a list up
-    tells that server which repository names you are viewing. Your token, the README,
-    and everything else stay on this device.
-  </p>
-  <form id="cache-form">
-    <label for="cache-url">Cache server URL</label>
-    <input id="cache-url" name="cache-url" type="url" spellcheck="false"
-      autocomplete="off" placeholder="https://cache.example.com" />
-    <p class="note" id="cache-default" hidden></p>
-    <label class="check"><input id="cache-enabled" type="checkbox" /><span>Use the shared cache</span></label>
-    <div class="actions"><button id="cache-save" type="submit">Save</button></div>
-    <p class="status" id="cache-status" role="status" hidden></p>
-  </form>
+  <h2>Metadata cache</h2>
+  <p>Repository metadata stays on this device. Fresh entries load immediately while older entries update in the background.</p>
+  <dl aria-label="Local cache details">
+    <dt>Repositories</dt><dd id="cache-entries">—</dd>
+    <dt>Storage used</dt><dd id="cache-usage">—</dd>
+    <dt>Fresh for</dt><dd id="cache-freshness">—</dd>
+    <dt>Kept for</dt><dd id="cache-retention">—</dd>
+  </dl>
+  <button id="cache-clear" type="button">Clear metadata cache</button>
+  <p class="note">This removes cached repository metadata only. Your GitHub token stays connected.</p>
+  <p class="status" id="cache-status" role="status" hidden></p>
 `;
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
-
   if (!element) throw new Error("The options page could not start.");
   return element;
 }
 
-const form = requiredElement<HTMLFormElement>("#cache-form");
-const urlInput = requiredElement<HTMLInputElement>("#cache-url");
-const enabledInput = requiredElement<HTMLInputElement>("#cache-enabled");
-const saveButton = requiredElement<HTMLButtonElement>("#cache-save");
-const defaultNote = requiredElement<HTMLElement>("#cache-default");
+const entries = requiredElement<HTMLElement>("#cache-entries");
+const usage = requiredElement<HTMLElement>("#cache-usage");
+const freshness = requiredElement<HTMLElement>("#cache-freshness");
+const retention = requiredElement<HTMLElement>("#cache-retention");
+const clearButton = requiredElement<HTMLButtonElement>("#cache-clear");
 const status = requiredElement<HTMLElement>("#cache-status");
 
 async function sendRequest<T>(request: ExtensionRequest): Promise<T> {
   const response = (await chrome.runtime.sendMessage(
     request,
   )) as ExtensionResponse<T>;
-
   if (!response.ok) throw new Error(response.error.message);
   return response.data;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`;
+  if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(1)} KB`;
+  return `${(bytes / 1_048_576).toFixed(1)} MB`;
 }
 
 function report(message: string, tone: "ok" | "error"): void {
@@ -112,64 +102,30 @@ function report(message: string, tone: "ok" | "error"): void {
   status.hidden = false;
 }
 
-function apply(cache: SharedCacheStatus): void {
-  urlInput.value = cache.serverUrl;
-  enabledInput.checked = cache.enabled;
-  defaultNote.hidden = cache.builtInUrl === "";
-  defaultNote.textContent = cache.builtInUrl
-    ? `Leave this empty to use the server this build ships with: ${cache.builtInUrl}`
-    : "";
+function apply(cache: LocalCacheStatus): void {
+  entries.textContent = String(cache.entries);
+  usage.textContent = `${formatBytes(cache.bytes)} of ${formatBytes(cache.maxBytes)}`;
+  freshness.textContent = `${cache.freshHours} ${cache.freshHours === 1 ? "hour" : "hours"}`;
+  retention.textContent = `${cache.retentionDays} ${cache.retentionDays === 1 ? "day" : "days"}`;
 }
 
-void sendRequest<SharedCacheStatus>({ type: "cache.status" })
+void sendRequest<LocalCacheStatus>({ type: "cache.status" })
   .then(apply)
-  .catch(() => report("Could not read the current settings.", "error"));
+  .catch(() => report("Could not read the local cache.", "error"));
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
+clearButton.addEventListener("click", async () => {
+  clearButton.disabled = true;
   status.hidden = true;
 
-  let serverUrl: string;
-
   try {
-    serverUrl = normalizeCacheServerUrl(urlInput.value);
+    apply(await sendRequest<LocalCacheStatus>({ type: "cache.clear" }));
+    report("Metadata cache cleared. Your GitHub token is unchanged.", "ok");
   } catch (error) {
     report(
-      error instanceof Error ? error.message : "Enter a valid URL.",
-      "error",
-    );
-    return;
-  }
-
-  // Chrome only grants an optional host permission during the user gesture that
-  // asked for it, so this runs before any await.
-  const permission =
-    serverUrl === ""
-      ? Promise.resolve(true)
-      : chrome.permissions.request({ origins: [`${new URL(serverUrl).origin}/*`] });
-
-  saveButton.disabled = true;
-
-  try {
-    if (!(await permission)) {
-      report("Chrome did not grant access to that server.", "error");
-      return;
-    }
-
-    apply(
-      await sendRequest<SharedCacheStatus>({
-        type: "cache.save",
-        serverUrl,
-        enabled: enabledInput.checked,
-      }),
-    );
-    report("Saved.", "ok");
-  } catch (error) {
-    report(
-      error instanceof Error ? error.message : "Could not save these settings.",
+      error instanceof Error ? error.message : "Could not clear the metadata cache.",
       "error",
     );
   } finally {
-    saveButton.disabled = false;
+    clearButton.disabled = false;
   }
 });

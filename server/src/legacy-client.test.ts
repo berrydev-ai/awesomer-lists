@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { RepositoryMetadata } from "../domain/types";
-import { lookupSharedMetadata, publishSharedMetadata } from "./client";
+import type { RepositoryMetadata } from "../../src/domain/types";
+import { lookupSharedMetadata, publishSharedMetadata } from "./legacy-client";
 
 const record: RepositoryMetadata = {
   nameWithOwner: "mastra-ai/mastra",

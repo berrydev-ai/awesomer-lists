@@ -2,145 +2,97 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExtensionRequest, SharedCacheStatus } from "./messages";
+import type { ExtensionRequest, LocalCacheStatus } from "./messages";
 
 let sendMessage: ReturnType<typeof vi.fn>;
-let requestPermission: ReturnType<typeof vi.fn>;
-let saved: SharedCacheStatus | null;
+let cache: LocalCacheStatus;
 
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
   document.body.replaceChildren();
-  saved = null;
-  requestPermission = vi.fn(async () => true);
+  cache = {
+    entries: 12,
+    bytes: 12_288,
+    maxBytes: 5_242_880,
+    freshHours: 6,
+    retentionDays: 30,
+  };
   sendMessage = vi.fn(async (request: ExtensionRequest) => {
-    if (request.type === "cache.status") {
-      return {
-        ok: true,
-        data: {
-          serverUrl: "",
-          enabled: true,
-          builtInUrl: "https://built-in.example.com",
-          activeUrl: "https://built-in.example.com",
-        },
-      };
+    if (request.type === "cache.status") return { ok: true, data: cache };
+    if (request.type === "cache.clear") {
+      cache = { ...cache, entries: 0, bytes: 0 };
+      return { ok: true, data: cache };
     }
-
-    if (request.type === "cache.save") {
-      saved = {
-        serverUrl: request.serverUrl,
-        enabled: request.enabled,
-        builtInUrl: "https://built-in.example.com",
-        activeUrl: request.enabled
-          ? request.serverUrl || "https://built-in.example.com"
-          : "",
-      };
-      return { ok: true, data: saved };
-    }
-
     return { ok: false, error: { code: "INVALID_REQUEST", message: "Invalid" } };
   });
 
   globalThis.chrome = {
     runtime: { sendMessage },
-    permissions: { request: requestPermission },
   } as unknown as typeof chrome;
 });
 
-function form(): {
-  element: HTMLFormElement;
-  url: HTMLInputElement;
-  enabled: HTMLInputElement;
-  status: HTMLElement;
-} {
-  const element = document.querySelector<HTMLFormElement>("#cache-form");
-  const url = document.querySelector<HTMLInputElement>("#cache-url");
-  const enabled = document.querySelector<HTMLInputElement>("#cache-enabled");
-  const status = document.querySelector<HTMLElement>("#cache-status");
-
-  if (!element || !url || !enabled || !status) {
-    throw new Error("The options form was not rendered.");
-  }
-
-  return { element, url, enabled, status };
-}
-
-function submit(element: HTMLFormElement): void {
-  element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-}
-
 describe("options page", () => {
-  it("shows the server this build ships with", async () => {
+  it("shows local cache usage and retention without server controls", async () => {
     await import("./options");
-    const note = await waitUntil(() => {
-      const element = document.querySelector<HTMLElement>("#cache-default");
-      return element && element.textContent !== "" ? element : null;
+    await waitUntil(() =>
+      document.querySelector("#cache-entries")?.textContent === "12" ? true : null,
+    );
+
+    expect(document.querySelector("#cache-usage")?.textContent).toBe(
+      "12.0 KB of 5.0 MB",
+    );
+    expect(document.querySelector("#cache-freshness")?.textContent).toBe(
+      "6 hours",
+    );
+    expect(document.querySelector("#cache-retention")?.textContent).toBe(
+      "30 days",
+    );
+    expect(document.querySelector('input[type="url"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("server");
+  });
+
+  it("clears metadata while explaining that the token stays connected", async () => {
+    await import("./options");
+    const button = document.querySelector<HTMLButtonElement>("#cache-clear");
+    if (!button) throw new Error("Clear cache button was not rendered.");
+    button.click();
+
+    const status = await waitUntil(() => {
+      const element = document.querySelector<HTMLElement>("#cache-status");
+      return element && !element.hidden ? element : null;
     });
 
-    expect(note.hidden).toBe(false);
-    expect(note.textContent).toContain("https://built-in.example.com");
+    expect(sendMessage).toHaveBeenCalledWith({ type: "cache.clear" });
+    expect(document.querySelector("#cache-entries")?.textContent).toBe("0");
+    expect(document.querySelector("#cache-usage")?.textContent).toBe(
+      "0 B of 5.0 MB",
+    );
+    expect(status.textContent).toContain("GitHub token is unchanged");
+    expect(status.dataset.tone).toBe("ok");
   });
 
-  it("asks Chrome for access before saving a server URL", async () => {
-    await import("./options");
-    const fields = form();
-
-    fields.url.value = "https://cache.example.com/";
-    submit(fields.element);
-
-    await waitUntil(() => (saved ? true : null));
-
-    expect(requestPermission).toHaveBeenCalledWith({
-      origins: ["https://cache.example.com/*"],
+  it("keeps the current usage visible when clearing fails", async () => {
+    sendMessage.mockImplementation(async (request: ExtensionRequest) => {
+      if (request.type === "cache.status") return { ok: true, data: cache };
+      return {
+        ok: false,
+        error: { code: "INVALID_REQUEST", message: "Storage is unavailable." },
+      };
     });
-    expect(saved).toMatchObject({
-      serverUrl: "https://cache.example.com",
-      enabled: true,
+    await import("./options");
+    await waitUntil(() =>
+      document.querySelector("#cache-entries")?.textContent === "12" ? true : null,
+    );
+    document.querySelector<HTMLButtonElement>("#cache-clear")?.click();
+
+    const status = await waitUntil(() => {
+      const element = document.querySelector<HTMLElement>("#cache-status");
+      return element && !element.hidden ? element : null;
     });
-    expect(fields.status.textContent).toBe("Saved.");
-  });
-
-  it("does not save when Chrome refuses the permission", async () => {
-    requestPermission.mockResolvedValue(false);
-    await import("./options");
-    const fields = form();
-
-    fields.url.value = "https://cache.example.com";
-    submit(fields.element);
-
-    await waitUntil(() => (fields.status.hidden ? null : true));
-
-    expect(saved).toBeNull();
-    expect(fields.status.dataset.tone).toBe("error");
-  });
-
-  it("explains a URL it cannot use and asks for no permission", async () => {
-    await import("./options");
-    const fields = form();
-
-    fields.url.value = "http://cache.example.com";
-    submit(fields.element);
-
-    await waitUntil(() => (fields.status.hidden ? null : true));
-
-    expect(fields.status.textContent).toContain("https://");
-    expect(requestPermission).not.toHaveBeenCalled();
-    expect(saved).toBeNull();
-  });
-
-  it("turns the shared cache off without needing a permission prompt", async () => {
-    await import("./options");
-    const fields = form();
-
-    fields.url.value = "";
-    fields.enabled.checked = false;
-    submit(fields.element);
-
-    await waitUntil(() => (saved ? true : null));
-
-    expect(requestPermission).not.toHaveBeenCalled();
-    expect(saved).toMatchObject({ serverUrl: "", enabled: false, activeUrl: "" });
+    expect(document.querySelector("#cache-entries")?.textContent).toBe("12");
+    expect(status.textContent).toBe("Storage is unavailable.");
+    expect(status.dataset.tone).toBe("error");
   });
 });
 
@@ -150,6 +102,5 @@ async function waitUntil<T>(read: () => T | null): Promise<T> {
     if (value) return value;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-
   throw new Error("Timed out waiting for the options page.");
 }

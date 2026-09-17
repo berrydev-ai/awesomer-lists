@@ -24,6 +24,7 @@ import type {
   ExtensionResponse,
   MetadataLoadResult,
 } from "./messages";
+import { METADATA_PORT_NAME } from "./messages";
 import type { PreviewConfig } from "./preview-config";
 import { formatRepositoryCount } from "./ui/format";
 
@@ -40,9 +41,13 @@ interface ModalState {
   metadata: RepositoryMetadata[];
   missing: string[];
   cachedCount: number;
-  sharedCachedCount: number;
+  staleCount: number;
+  pendingCount: number;
+  complete: boolean;
+  warning: string | null;
   rateLimit: MetadataLoadResult["rateLimit"];
   hasLoaded: boolean;
+  authRecoveryRequired: boolean;
   options: TableOptions;
   collapsedGroups: Set<string>;
   settingsOpen: boolean;
@@ -896,14 +901,22 @@ const REDESIGN_STYLES = `
   }
 `;
 
-chrome.runtime.onMessage.addListener((message: unknown) => {
+chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   if (
     typeof message !== "object" ||
     message === null ||
-    !("type" in message) ||
-    message.type !== "awesomer.toggle"
+    !("type" in message)
   ) {
-    return;
+    return false;
+  }
+
+  if (message.type === "awesomer.ping") {
+    sendResponse?.("awesomer.ready");
+    return false;
+  }
+
+  if (message.type !== "awesomer.toggle") {
+    return false;
   }
 
   const existing = document.getElementById(ROOT_ID);
@@ -914,11 +927,14 @@ chrome.runtime.onMessage.addListener((message: unknown) => {
     } else {
       existing.remove();
     }
-    return;
+    sendResponse?.("awesomer.ready");
+    return false;
   }
 
   activeModalCleanup?.();
   void openModal();
+  sendResponse?.("awesomer.ready");
+  return false;
 });
 
 async function sendRequest<T>(request: ExtensionRequest): Promise<T> {
@@ -1135,7 +1151,7 @@ async function openModal(): Promise<void> {
               <iframe class="token-frame" id="token-frame" title="Secure GitHub token entry"></iframe>
               <div class="button-row">
                 <button class="secondary-button" id="cancel-auth" type="button" hidden>Cancel</button>
-                <button class="danger-button" id="remove-token" type="button" hidden>Remove token</button>
+                <button class="danger-button" id="remove-token" type="button" hidden>Disconnect</button>
               </div>
               <p class="inline-error" id="auth-error" role="alert" hidden></p>
             </div>
@@ -1231,9 +1247,13 @@ async function openModal(): Promise<void> {
     metadata: [],
     missing: [],
     cachedCount: 0,
-    sharedCachedCount: 0,
+    staleCount: 0,
+    pendingCount: 0,
+    complete: false,
+    warning: null,
     rateLimit: null,
     hasLoaded: false,
+    authRecoveryRequired: false,
     options: {
       query: "",
       hideArchived: false,
@@ -1310,7 +1330,12 @@ async function openModal(): Promise<void> {
   );
 
   let tokenMessageHandler: ((event: MessageEvent) => void) | null = null;
+  let metadataPort: chrome.runtime.Port | null = null;
+  let cancelMetadataStream: (() => void) | null = null;
+  let loadGeneration = 0;
   const close = (): void => {
+    loadGeneration += 1;
+    cancelMetadataStream?.();
     if (tokenMessageHandler) {
       window.removeEventListener("message", tokenMessageHandler);
     }
@@ -1376,7 +1401,8 @@ async function openModal(): Promise<void> {
     authError.hidden = !message;
     authError.textContent = message;
     cancelAuth.hidden = !state.hasLoaded;
-    removeToken.hidden = !(state.auth?.hasToken ?? false);
+    removeToken.hidden =
+      !state.authRecoveryRequired && !(state.auth?.hasToken ?? false);
     const frameUrl = new URL(tokenPageUrl);
     frameUrl.searchParams.set("theme", state.themeMode);
     frameUrl.searchParams.set("accent", state.accent);
@@ -1708,13 +1734,42 @@ async function openModal(): Promise<void> {
       footer.append(account);
     }
 
-    const cache = document.createElement("span");
-    cache.textContent = `${state.cachedCount + state.sharedCachedCount} from cache`;
-
-    if (state.sharedCachedCount > 0) {
-      cache.title = `${state.sharedCachedCount} came from the shared cache server`;
+    if (state.cachedCount > 0) {
+      const cache = document.createElement("span");
+      cache.textContent = `${state.cachedCount} cached`;
+      footer.append(cache);
     }
-    footer.append(cache);
+
+    if (state.staleCount > 0) {
+      const stale = document.createElement("span");
+      stale.className = "footer-warning";
+      stale.textContent = `${state.staleCount} stale`;
+      footer.append(stale);
+    }
+
+    if (state.pendingCount > 0) {
+      const progress = document.createElement("span");
+      progress.className = state.complete ? "footer-warning" : "";
+      progress.setAttribute("role", "status");
+      progress.textContent = state.complete
+        ? `${state.pendingCount} ${state.pendingCount === 1 ? "project was" : "projects were"} not updated`
+        : `${state.pendingCount} ${state.pendingCount === 1 ? "project" : "projects"} still loading…`;
+      footer.append(progress);
+    } else if (state.metadata.length > 0) {
+      const newestFetch = state.metadata.reduce<string | null>((newest, item) => {
+        if (!newest || Date.parse(item.fetchedAt) > Date.parse(newest)) {
+          return item.fetchedAt;
+        }
+        return newest;
+      }, null);
+
+      if (newestFetch) {
+        const updated = document.createElement("span");
+        updated.textContent = `Updated ${formatRelativeDate(newestFetch, state.options.now).toLocaleLowerCase()}`;
+        updated.title = formatCalendarDate(newestFetch);
+        footer.append(updated);
+      }
+    }
 
     if (state.rateLimit) {
       const rate = document.createElement("span");
@@ -1728,6 +1783,33 @@ async function openModal(): Promise<void> {
       missing.className = "footer-warning";
       missing.textContent = `${state.missing.length} unavailable ${state.missing.length === 1 ? "repository" : "repositories"}`;
       footer.append(missing);
+    }
+
+    if (state.warning) {
+      const warning = document.createElement("span");
+      warning.className = "footer-warning";
+      warning.textContent = state.warning;
+      footer.append(warning);
+
+      const retry = document.createElement("button");
+      retry.className = "compact-button";
+      retry.id = "stream-retry-button";
+      retry.type = "button";
+      retry.textContent = "Try again";
+      retry.addEventListener("click", () => void loadData(false));
+      footer.append(retry);
+
+      if (
+        /GitHub rejected the token|dedicated GitHub token/i.test(state.warning)
+      ) {
+        const token = document.createElement("button");
+        token.className = "compact-button";
+        token.id = "stream-token-button";
+        token.type = "button";
+        token.textContent = "GitHub access";
+        token.addEventListener("click", () => showAuth(state.warning ?? ""));
+        footer.append(token);
+      }
     }
 
     const projectRepositoryLink = document.createElement("a");
@@ -1767,12 +1849,123 @@ async function openModal(): Promise<void> {
     renderTable();
   };
 
+  const applyMetadataSnapshot = (
+    current: readonly RepositoryMetadata[],
+    result: MetadataLoadResult,
+    refresh: boolean,
+  ): RepositoryMetadata[] => {
+    const missing = new Set(
+      result.missing.map((name) => name.toLocaleLowerCase()),
+    );
+    const snapshot = result.metadata.filter(
+      (item) => !missing.has(item.nameWithOwner.toLocaleLowerCase()),
+    );
+
+    // Stream snapshots are cumulative and authoritative. During an active manual
+    // refresh, keep the last visible value until GitHub answers for that project.
+    if (!refresh || result.pendingCount === 0) return snapshot;
+
+    const byRepository = new Map(
+      current
+        .filter((item) => !missing.has(item.nameWithOwner.toLocaleLowerCase()))
+        .map((item) => [item.nameWithOwner.toLocaleLowerCase(), item]),
+    );
+    snapshot.forEach((item) => {
+      byRepository.set(item.nameWithOwner.toLocaleLowerCase(), item);
+    });
+    return [...byRepository.values()];
+  };
+
+  const streamMetadata = (
+    repositories: string[],
+    refresh: boolean,
+    generation: number,
+  ): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const port = chrome.runtime.connect({ name: METADATA_PORT_NAME });
+      metadataPort = port;
+      let settled = false;
+      let cancel: () => void;
+
+      const finish = (error?: RequestFailure): void => {
+        if (settled) return;
+        settled = true;
+        port.onMessage.removeListener(onMessage);
+        port.onDisconnect.removeListener(onDisconnect);
+        port.disconnect();
+        if (metadataPort === port) metadataPort = null;
+        if (cancelMetadataStream === cancel) cancelMetadataStream = null;
+        if (error) reject(error);
+        else resolve();
+      };
+
+      const onMessage = (message: ExtensionResponse<MetadataLoadResult>): void => {
+        if (generation !== loadGeneration || metadataPort !== port) return;
+
+        if (!message.ok) {
+          finish(
+            Object.assign(new Error(message.error.message), {
+              code: message.error.code,
+            }) as RequestFailure,
+          );
+          return;
+        }
+
+        const result = message.data;
+        state.metadata = applyMetadataSnapshot(state.metadata, result, refresh);
+        state.missing = result.missing;
+        state.cachedCount = result.cachedCount;
+        state.staleCount = result.staleCount;
+        state.pendingCount = result.pendingCount;
+        state.complete = result.complete;
+        state.warning = result.warning;
+        state.rateLimit = result.rateLimit;
+        showMain();
+
+        if (result.complete) finish();
+      };
+
+      const onDisconnect = (): void => {
+        const lastErrorMessage = chrome.runtime.lastError?.message;
+        if (settled || generation !== loadGeneration || metadataPort !== port) {
+          return;
+        }
+        finish(
+          Object.assign(
+            new Error(
+              lastErrorMessage
+                ? `Metadata updates stopped. ${lastErrorMessage}`
+                : "Metadata updates stopped. Try again to finish loading.",
+            ),
+            { code: "CONNECTION_LOST" },
+          ) as RequestFailure,
+        );
+      };
+
+      cancel = () => finish();
+      cancelMetadataStream = cancel;
+      port.onMessage.addListener(onMessage);
+      port.onDisconnect.addListener(onDisconnect);
+      port.postMessage({ type: "metadata.load", repositories, refresh });
+    });
+
   const loadData = async (refresh: boolean): Promise<void> => {
     if (!page) return;
 
-    showView("loading-view");
-    loadingTitle.textContent = "Reading the Awesome list…";
-    loadingDetail.textContent = "Fetching raw Markdown from GitHub.";
+    const generation = loadGeneration + 1;
+    loadGeneration = generation;
+    cancelMetadataStream?.();
+    state.warning = null;
+    state.complete = false;
+
+    if (state.entries.length === 0) {
+      showView("loading-view");
+      loadingTitle.textContent = "Reading the Awesome list…";
+      loadingDetail.textContent = "Fetching raw Markdown from GitHub.";
+    } else {
+      state.pendingCount = state.entries.length;
+      showMain();
+    }
 
     try {
       const repository = createRepositoryRef(page.owner, page.name);
@@ -1783,12 +1976,15 @@ async function openModal(): Promise<void> {
         );
       }
 
-      const markdown = await sendRequest<string>({
-        type: "readme.load",
-        repository: repository.nameWithOwner,
-        sourceUrl: currentRawSource,
-      });
-      state.entries = parseAwesomeList(markdown);
+      if (state.entries.length === 0) {
+        const markdown = await sendRequest<string>({
+          type: "readme.load",
+          repository: repository.nameWithOwner,
+          sourceUrl: currentRawSource,
+        });
+        if (generation !== loadGeneration) return;
+        state.entries = parseAwesomeList(markdown);
+      }
 
       if (state.entries.length === 0) {
         throw new Error(
@@ -1799,18 +1995,14 @@ async function openModal(): Promise<void> {
       loadingTitle.textContent = `Loading ${state.entries.length} projects…`;
       loadingDetail.textContent =
         "Batching exact stars, commits, issues, licenses, and archived state.";
-      const result = await sendRequest<MetadataLoadResult>({
-        type: "metadata.load",
-        repositories: state.entries.map((entry) => entry.repository.nameWithOwner),
+      state.pendingCount = state.entries.length;
+      await streamMetadata(
+        state.entries.map((entry) => entry.repository.nameWithOwner),
         refresh,
-      });
-      state.metadata = result.metadata;
-      state.missing = result.missing;
-      state.cachedCount = result.cachedCount;
-      state.sharedCachedCount = result.sharedCachedCount;
-      state.rateLimit = result.rateLimit;
-      showMain();
+        generation,
+      );
     } catch (error) {
+      if (generation !== loadGeneration) return;
       const failure = error as Partial<RequestFailure>;
 
       if (failure.code === "AUTH_REQUIRED" || failure.code === "INVALID_TOKEN") {
@@ -1819,9 +2011,18 @@ async function openModal(): Promise<void> {
         return;
       }
 
-      errorMessage.textContent =
-        error instanceof Error ? error.message : "The extension could not continue.";
-      showView("error-view");
+      if (state.entries.length > 0) {
+        if (failure.code === "CONNECTION_LOST") state.complete = true;
+        state.warning =
+          error instanceof Error
+            ? error.message
+            : "Metadata updates stopped. Try again.";
+        showMain();
+      } else {
+        errorMessage.textContent =
+          error instanceof Error ? error.message : "The extension could not continue.";
+        showView("error-view");
+      }
     }
   };
 
@@ -1874,6 +2075,7 @@ async function openModal(): Promise<void> {
       remembered: data.auth.remembered,
       login: data.auth.login,
     };
+    state.authRecoveryRequired = false;
     authError.hidden = true;
     void loadData(false);
   };
@@ -1922,10 +2124,25 @@ async function openModal(): Promise<void> {
   );
 
   cancelAuth.addEventListener("click", showMain);
-  removeToken.addEventListener("click", async () => {
-    state.auth = await sendRequest<AuthStatus>({ type: "auth.clear" });
-    showAuth("The GitHub token was removed.");
-  });
+  const disconnectAuth = async (): Promise<void> => {
+    removeToken.disabled = true;
+
+    try {
+      state.auth = await sendRequest<AuthStatus>({ type: "auth.clear" });
+      state.authRecoveryRequired = false;
+      showAuth("GitHub access was disconnected.");
+    } catch (error) {
+      state.authRecoveryRequired = true;
+      showAuth(
+        error instanceof Error
+          ? `Could not disconnect GitHub access. ${error.message}`
+          : "Could not disconnect GitHub access. Try again.",
+      );
+    } finally {
+      removeToken.disabled = false;
+    }
+  };
+  removeToken.addEventListener("click", () => void disconnectAuth());
 
   requiredElement<HTMLButtonElement>(
     shadow,
@@ -1937,10 +2154,7 @@ async function openModal(): Promise<void> {
   requiredElement<HTMLButtonElement>(
     shadow,
     "#settings-disconnect",
-  ).addEventListener("click", async () => {
-    state.auth = await sendRequest<AuthStatus>({ type: "auth.clear" });
-    showAuth("The GitHub token was removed.");
-  });
+  ).addEventListener("click", () => void disconnectAuth());
 
   shadow.addEventListener("click", (event) => {
     const target = event.target;
@@ -2139,7 +2353,18 @@ async function openModal(): Promise<void> {
   sourceLink.href =
     currentRawSource ?? `https://github.com/${page.owner}/${page.name}#readme`;
   renderAppearance();
-  state.auth = await sendRequest<AuthStatus>({ type: "auth.status" });
+  try {
+    state.auth = await sendRequest<AuthStatus>({ type: "auth.status" });
+  } catch (error) {
+    state.auth = null;
+    state.authRecoveryRequired = true;
+    showAuth(
+      error instanceof Error
+        ? `Could not read saved GitHub access. Disconnect it and try again. ${error.message}`
+        : "Could not read saved GitHub access. Disconnect it and try again.",
+    );
+    return;
+  }
 
   if (!state.auth.hasToken) {
     showAuth();

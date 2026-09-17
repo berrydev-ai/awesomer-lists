@@ -37,7 +37,7 @@ beforeEach(() => {
 
 describe("secure token page", () => {
   it("saves the token inside the extension page and posts back status only", async () => {
-    const postMessage = vi.spyOn(window.parent, "postMessage");
+    const postMessage = vi.spyOn(window.parent, "postMessage").mockImplementation(() => undefined);
     await import("./token");
 
     const form = document.querySelector<HTMLFormElement>("#token-form");
@@ -63,7 +63,7 @@ describe("secure token page", () => {
         type: "awesomer.auth.saved",
         auth: { hasToken: true, remembered: true, login: "octocat" },
       },
-      "*",
+      "https://github.com",
     );
     expect(JSON.stringify(postMessage.mock.calls)).not.toContain(
       "dedicated-token-value-for-test",
@@ -73,7 +73,7 @@ describe("secure token page", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(postMessage).toHaveBeenCalledWith(
       { type: "awesomer.auth.key", key: "Escape" },
-      "*",
+      "https://github.com",
     );
 
     postMessage.mockClear();
@@ -83,7 +83,7 @@ describe("secure token page", () => {
     );
     expect(postMessage).toHaveBeenCalledWith(
       { type: "awesomer.auth.key", key: "Tab", direction: "backward" },
-      "*",
+      "https://github.com",
     );
 
     postMessage.mockClear();
@@ -91,7 +91,7 @@ describe("secure token page", () => {
     save.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
     expect(postMessage).toHaveBeenCalledWith(
       { type: "awesomer.auth.key", key: "Tab", direction: "forward" },
-      "*",
+      "https://github.com",
     );
   });
 
@@ -102,7 +102,7 @@ describe("secure token page", () => {
       "http://127.0.0.1:4173/token.html?preview=1&theme=dark&accent=indigo",
     );
     delete (globalThis as typeof globalThis & { chrome?: typeof chrome }).chrome;
-    const postMessage = vi.spyOn(window.parent, "postMessage");
+    const postMessage = vi.spyOn(window.parent, "postMessage").mockImplementation(() => undefined);
 
     await import("./token");
 
@@ -120,7 +120,7 @@ describe("secure token page", () => {
         type: "awesomer.auth.saved",
         auth: { hasToken: true, remembered: false, login: "UI preview" },
       },
-      "*",
+      "http://127.0.0.1:4173",
     );
   });
 });

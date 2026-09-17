@@ -1,104 +1,94 @@
 # Contributing
 
-Thanks for helping improve Awesomer Lists. This is a small project, so the process is short.
-
-## Before you start
-
-For anything larger than a bug fix or a typo, open an issue first and describe the change. That avoids work that does not fit the extension's scope: turning a GitHub Awesome list into a sortable, grouped project table, without analytics and without sending your token anywhere but `api.github.com`.
+Awesomer Lists turns a GitHub Awesome list into a sortable, grouped project table. Keep the Chrome and Safari builds in this repository. User data stays on the device, and the token goes only to `api.github.com`.
 
 ## Set up
 
+Use Node 24, as specified in `.nvmrc` and CI:
+
 ```sh
-npm install
+npm ci
 npm run check
 ```
 
-`npm run check` runs the tests, the type check, the build, and a check of the built extension. It should pass before you change anything. Node 24 is what CI uses and what `.nvmrc` pins.
-
-To try your build in Chrome:
-
-1. Run `npm run build`.
-2. Open `chrome://extensions` and turn on **Developer mode**.
-3. Choose **Load unpacked** and select the `dist` folder.
-4. Click **Reload** on the extension card after each rebuild.
-
-For UI work you usually do not need the extension at all. Run `npm run dev` and open [http://127.0.0.1:4173/preview.html](http://127.0.0.1:4173/preview.html). It uses a committed snapshot of public GitHub data, reloads on save, and never calls GitHub.
+To inspect the interface without credentials, run `npm run dev` and open [the local preview](http://127.0.0.1:4173/preview.html). The preview uses a committed GitHub snapshot and simulated cache updates. It does not call GitHub or save a token.
 
 ## Commands
 
-- `npm test` runs behavior tests. `npm run test:watch` keeps them running.
-- `npm run typecheck` checks TypeScript.
-- `npm run build` writes the unpacked extension to `dist`.
-- `npm run verify` checks that build for missing files, a version mismatch, or an unexpected host permission.
-- `npm run dev` serves the UI preview with browser reload.
-- `npm run preview` serves the same preview without reload.
-- `npm run check` runs tests, type check, build, and verify together. This is what CI runs.
-- `npx wrangler dev` inside `server/` serves the shared cache Worker at `http://localhost:8787`.
+| Command | Result |
+| --- | --- |
+| `npm test` | Runs behavior tests with local fixtures. |
+| `npm run typecheck` | Checks TypeScript. |
+| `npm run build` | Writes the Chrome extension to `dist/`. |
+| `npm run build:safari` | Writes Safari resources to `dist-safari/`. |
+| `npm run build:all` | Builds both browser packages. |
+| `npm run verify:all` | Checks files, versions, permissions, and bundled code in both packages. |
+| `npm run check` | Runs tests, type checking, both builds, and both distribution checks. |
+| `npm run safari:package` | Creates a macOS Xcode project under `safari/generated/`. |
+| `npm run safari:native-build` | Creates and compiles the unsigned macOS app. |
+| `npm run dev` | Serves the preview with automatic reload. |
+| `npm run preview` | Serves the preview without automatic reload. |
 
-## Where code lives
+Xcode packaging requires macOS and an accepted Xcode license. Generated projects and build products are ignored by Git. Rebuild the project after web source changes. Packaging does not install or publish the extension.
 
-| Path                | What it holds                                                          |
-| ------------------- | ---------------------------------------------------------------------- |
-| `src/domain/`       | Parsing Awesome READMEs, maintenance labels, and the table model        |
-| `src/github/`       | The GitHub REST and GraphQL clients                                     |
-| `src/server-cache/` | The shared cache client, config, and the payload shape both sides share |
-| `src/ui/`           | Formatting helpers for the modal                                        |
-| `src/`              | Background service worker, content script, options, and token pages     |
-| `public/`           | `manifest.json` and static extension pages                              |
-| `scripts/`          | Build and preview scripts                                               |
-| `server/`           | The Cloudflare Worker for the shared cache                              |
-| `.github/`          | CI, the release workflow, and issue and pull request templates          |
+The native build makes sure that the app and embedded extension use matching bundle identifiers and a macOS 12.0 deployment target. Safari 17.1 remains required. The Safari manifest omits Chrome-only background and options-page fields.
 
-Tests sit next to the file they cover, as `name.test.ts`.
+See [README.md](README.md) for Chrome installation, Safari temporary installation, and signed Safari development builds.
 
-## Changing the shared cache payload
+## Source layout
 
-`src/server-cache/payload.ts` is validated by both the extension and the Worker. A change there is a protocol change: update the validator, the tests on both sides, and `server/README.md` in the same pull request. Deployed Workers hold cached records for seven days, so keep new fields optional where you can.
+| Path | Purpose |
+| --- | --- |
+| `src/domain/` | README parsing, maintenance labels, and the table model. |
+| `src/cache/` | Local metadata records, eviction, refresh coordination, and rate-limit pauses. |
+| `src/github/` | Direct GitHub REST and GraphQL requests. |
+| `src/token-store.ts` | Private session tokens and remembered tokens in extension-origin IndexedDB. |
+| `src/sender.ts` | Request permissions for content scripts and extension pages. |
+| `src/background.ts` | Browser events, authorization, and progress messages. |
+| `src/content.ts` | The GitHub modal and progressive results. |
+| `src/options.ts` | Local cache usage and clearing. |
+| `src/ui/` | Display helpers. |
+| `public/` | The base manifest, extension pages, and icons. |
+| `scripts/` | Browser builds, distribution checks, preview, and Safari packaging. |
+| `server/` | The earlier shared-cache service and its compatibility tests. Current extensions do not use it. |
+| `src/server-cache/payload.ts` | The legacy service payload contract. It is excluded from browser bundles. |
 
-## Tests
+## Behavior and tests
 
-Write tests for behavior, not for internals. Add a failing test with any bug fix, and cover the new path with any feature. Tests use [Vitest](https://vitest.dev) with `happy-dom`, and they must not make network calls. Use fixtures instead of live GitHub responses.
+Tests sit next to the source that they cover. Use Vitest and local fixtures. Do not send test credentials or test requests to GitHub.
 
-## Style
+Cover changes to expiry, storage limits, interrupted loads, cache clearing, sender validation, and token migration. A failed batch must not discard earlier saved results. A cleared cache must not refill from work that started before the clear. Clearing metadata must preserve credentials and active rate-limit pauses.
 
-- TypeScript, ES modules, no build-time framework.
-- Match the surrounding file. There is no formatter step, so keep diffs small and free of unrelated reformatting.
-- Keep user-facing text plain and short, in the voice already used in the UI and the README.
+The cache retains public metadata for 30 days, treats it as fresh for six hours, and limits metadata storage to 25 MiB. Missing repositories have a 15-minute cache. Cache schema changes need migration tests. Credentials never belong in this cache.
 
-## Security and privacy rules
+Before submission, run `npm run check`. For Safari packaging changes, also run `npm run safari:native-build` on a Mac with Xcode. Test the installed extension in each affected browser. The HTML preview and mocked browser tests do not prove extension permissions or service-worker behavior.
 
-These are not negotiable, because people paste a GitHub token into this extension.
+## Security and privacy
 
-- The token goes only to `api.github.com`. Never send it to `raw.githubusercontent.com`, to the cache server, or anywhere else.
-- Page code must never be able to read the token back.
-- Do not add analytics, telemetry, or any third-party script.
-- Do not widen `permissions` or `host_permissions` in `public/manifest.json` without explaining why in the pull request.
-- The shared cache carries public counters only. Do not send README contents, URLs of private repositories, or anything identifying a user.
+- Send the token only to `api.github.com`. Raw Markdown requests must omit it.
+- Keep session storage restricted to trusted extension contexts. Remembered tokens belong in the extension-origin database.
+- Validate message senders by protocol, host, and extension page. Custom extension schemes can have a `null` URL origin in some environments.
+- Do not add analytics, third-party scripts, cache services, or arbitrary host permissions.
+- Explain any permission change and add a distribution check for its intended scope.
 
-Found a vulnerability? Do not open a public issue. Report it privately through [GitHub's security advisories](https://github.com/berrydev-ai/awesomer-lists/security/advisories/new).
+Report vulnerabilities privately through [GitHub security advisories](https://github.com/berrydev-ai/awesomer-lists/security/advisories/new).
 
-## Commits and pull requests
+## Style and documentation
 
-Commit messages follow [Conventional Commits](https://www.conventionalcommits.org), as in `feat(ui): move refresh data into the settings panel` and `fix: parse tables and skip missing repositories`. Common scopes here are `extension`, `ui`, `dev`, and `server`.
+Use TypeScript and ES modules. Match surrounding code and avoid unrelated formatting. There is no separate lint or formatting command in this repository.
 
-In the pull request, describe what changed and why, note anything a reviewer should click through in the extension or the preview, and confirm `npm run check` passes. Update the README when behavior, permissions, or commands change.
+Update the README when behavior, permissions, or commands change. Keep each Markdown paragraph on one physical line. Add user-visible changes under Unreleased in `CHANGELOG.md`.
 
-Add an entry to `CHANGELOG.md` under **Unreleased** for anything a user would notice. Internal-only changes do not need one.
+## Release process
 
-CI runs `npm ci`, the tests, the type check, the build, and `npm run verify` on Node 24, then uploads the unpacked extension as a build artifact you can download from the run and load in Chrome. CodeQL runs on the same pull request.
+1. Record the release version in `CHANGELOG.md`.
+2. Set the same version in `package.json`, `package-lock.json`, and `public/manifest.json`.
+3. Create and push the approved release tag.
+4. Review the draft release and its separate Chrome, Safari resources, and Xcode project archives.
+5. Publish the approved draft.
 
-## Releasing
-
-For maintainers.
-
-1. Move the **Unreleased** entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading.
-2. Set the same version in `package.json` and `public/manifest.json`. They must match, and the release fails if they do not.
-3. Commit as `chore(release): vX.Y.Z`, then tag with `git tag vX.Y.Z` and push the tag.
-4. The release workflow runs the full check, verifies the built extension, zips `dist`, and opens a **draft** release with generated notes.
-5. Review the draft, then publish it.
-
-The release is a draft on purpose, so a bad build never becomes a published download.
+The release workflow builds both browser packages and compiles the unsigned Safari app. Apple signing and App Store submission are separate owner actions. The workflow does not submit to either browser store.
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE) that covers this project.
+Contributions use the repository’s [MIT License](LICENSE).
