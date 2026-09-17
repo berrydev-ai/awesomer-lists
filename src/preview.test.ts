@@ -49,6 +49,21 @@ describe("standalone UI preview", () => {
       document.getElementById("awesomer-lists-extension-root")?.shadowRoot,
     ).toBeNull();
 
+    expect(shadow.querySelector("#footer")?.textContent).toContain("2 cached");
+    expect(shadow.querySelector("#footer")?.textContent).toContain("1 stale");
+    expect(shadow.querySelector("#footer")?.textContent).toContain(
+      "still loading",
+    );
+    await waitUntil(() => {
+      const text = shadow.querySelector("#footer")?.textContent ?? "";
+      return text.includes("API points left") && !text.includes("still loading")
+        ? true
+        : null;
+    });
+    expect(shadow.querySelector("#footer")?.textContent).not.toContain(
+      "still loading",
+    );
+
     await chrome.runtime.sendMessage({ type: "auth.clear" });
     window.dispatchEvent(
       new MessageEvent("message", {
@@ -88,7 +103,7 @@ async function waitUntil<T>(read: () => T | null): Promise<T> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const value = read();
     if (value) return value;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
 
   throw new Error("Timed out waiting for the standalone preview.");

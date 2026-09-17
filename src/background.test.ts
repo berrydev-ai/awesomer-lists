@@ -1,412 +1,246 @@
+import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ExtensionRequest, ExtensionResponse } from "./messages";
+import { METADATA_PORT_NAME } from "./messages";
 
-import type {
-  ExtensionRequest,
-  ExtensionResponse,
-  MetadataLoadResult,
-} from "./messages";
-
-const clientMocks = vi.hoisted(() => ({
-  validateGitHubToken: vi.fn(),
-  fetchRepositoryMetadataBatch: vi.fn(),
+const client = vi.hoisted(() => ({ validateGitHubToken: vi.fn(), fetchRepositoryMetadataBatch: vi.fn(), fetchRepositoryReadme: vi.fn() }));
+vi.mock("./github/client", async () => ({
+  ...await vi.importActual<typeof import("./github/client")>("./github/client"), ...client,
 }));
+type Listener = (message: unknown, sender: chrome.runtime.MessageSender, reply: (response: ExtensionResponse<unknown>) => void) => boolean | undefined;
+let listener: Listener;
+let connect: (port: chrome.runtime.Port) => void;
+let click: (tab: chrome.tabs.Tab) => Promise<void>;
+let tabSendMessage: ReturnType<typeof vi.fn>;
 
-const sharedCacheMocks = vi.hoisted(() => ({
-  lookupSharedMetadata: vi.fn(),
-  publishSharedMetadata: vi.fn(),
-}));
-
-vi.mock("./github/client", async () => {
-  const actual = await vi.importActual<typeof import("./github/client")>(
-    "./github/client",
-  );
-
-  return {
-    ...actual,
-    validateGitHubToken: clientMocks.validateGitHubToken,
-    fetchRepositoryMetadataBatch: clientMocks.fetchRepositoryMetadataBatch,
-  };
-});
-
-vi.mock("./server-cache/client", () => ({
-  lookupSharedMetadata: sharedCacheMocks.lookupSharedMetadata,
-  publishSharedMetadata: sharedCacheMocks.publishSharedMetadata,
-}));
-
-// `fetchedAt` is what the local cache measures a record's remaining life
-// against, so fixtures that stand in for a fresh GitHub answer must be recent.
-const JUST_FETCHED = new Date().toISOString();
-
-const MASTRA = {
-  nameWithOwner: "mastra-ai/mastra",
-  url: "https://github.com/mastra-ai/mastra",
-  description: "Build AI applications and agents.",
-  stars: 20_000,
-  forks: 1_500,
-  openIssues: 125,
-  lastCommitAt: "2026-07-08T12:00:00Z",
-  license: "Apache-2.0",
-  isArchived: false,
-  fetchedAt: JUST_FETCHED,
-};
-
-const NEXT = {
-  ...MASTRA,
-  nameWithOwner: "vercel/next.js",
-  url: "https://github.com/vercel/next.js",
-};
-
-type RuntimeListener = (
-  message: unknown,
-  sender: chrome.runtime.MessageSender,
-  sendResponse: (response: ExtensionResponse<unknown>) => void,
-) => boolean | undefined;
-
-interface MemoryStorageArea {
-  data: Record<string, unknown>;
-  area: chrome.storage.StorageArea;
-  setAccessLevel: ReturnType<typeof vi.fn>;
-}
-
-let runtimeListener: RuntimeListener | null;
-let localStorageArea: MemoryStorageArea;
-let sessionStorageArea: MemoryStorageArea;
-
-beforeEach(async () => {
-  vi.resetModules();
-  clientMocks.validateGitHubToken.mockReset().mockResolvedValue("octocat");
-  clientMocks.fetchRepositoryMetadataBatch.mockReset();
-  sharedCacheMocks.lookupSharedMetadata.mockReset().mockResolvedValue([]);
-  sharedCacheMocks.publishSharedMetadata.mockReset().mockResolvedValue(0);
-  localStorageArea = createMemoryStorageArea();
-  sessionStorageArea = createMemoryStorageArea();
-  runtimeListener = null;
-
-  globalThis.chrome = {
-    action: {
-      onClicked: { addListener: vi.fn() },
-      setBadgeText: vi.fn(),
-      setBadgeBackgroundColor: vi.fn(),
-    },
-    runtime: {
-      onMessage: {
-        addListener: vi.fn((listener: RuntimeListener) => {
-          runtimeListener = listener;
-        }),
-      },
-    },
-    scripting: { executeScript: vi.fn() },
-    tabs: { sendMessage: vi.fn() },
-    storage: {
-      local: {
-        ...localStorageArea.area,
-        setAccessLevel: localStorageArea.setAccessLevel,
-      },
-      session: {
-        ...sessionStorageArea.area,
-        setAccessLevel: sessionStorageArea.setAccessLevel,
-      },
-    },
-  } as unknown as typeof chrome;
-
-  await import("./background");
-});
-
-describe("background message workflow", () => {
-  it("keeps a session token private and reuses cached repository metadata", async () => {
-    const token = "dedicated-token-value-for-test";
-    const authResponse = await sendRequest({
-      type: "auth.save",
-      token,
-      remember: false,
-    });
-
-    expect(authResponse).toEqual({
-      ok: true,
-      data: { hasToken: true, remembered: false, login: "octocat" },
-    });
-    expect(JSON.stringify(authResponse)).not.toContain(token);
-    expect(sessionStorageArea.data["auth.githubToken"]).toBe(token);
-    expect(localStorageArea.data["auth.githubToken"]).toBeUndefined();
-    expect(localStorageArea.setAccessLevel).toHaveBeenCalledWith({
-      accessLevel: "TRUSTED_CONTEXTS",
-    });
-
-    clientMocks.fetchRepositoryMetadataBatch.mockResolvedValue({
-      metadata: [
-        {
-          nameWithOwner: "mastra-ai/mastra",
-          url: "https://github.com/mastra-ai/mastra",
-          description: "Build AI applications and agents.",
-          stars: 20_000,
-          forks: 1_500,
-          openIssues: 125,
-          lastCommitAt: "2026-07-08T12:00:00Z",
-          license: "Apache-2.0",
-          isArchived: false,
-          fetchedAt: JUST_FETCHED,
-        },
-      ],
-      missing: [],
-      rateLimit: { remaining: 4_900, resetAt: "2026-07-09T13:00:00Z" },
-    });
-
-    const request: ExtensionRequest = {
-      type: "metadata.load",
-      repositories: ["mastra-ai/mastra"],
-      refresh: false,
-    };
-    const firstResponse = await sendRequest(request);
-    const secondResponse = await sendRequest(request);
-
-    expect(firstResponse.ok).toBe(true);
-    expect(secondResponse.ok).toBe(true);
-    expect(clientMocks.fetchRepositoryMetadataBatch).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("shared cache settings", () => {
-  it("reports no shared cache until a server is saved", async () => {
-    expect(await sendRequest({ type: "cache.status" })).toEqual({
-      ok: true,
-      data: { serverUrl: "", enabled: true, builtInUrl: "", activeUrl: "" },
-    });
-  });
-
-  it("saves a normalized server URL and can turn the cache off again", async () => {
-    expect(
-      await sendRequest({
-        type: "cache.save",
-        serverUrl: "https://cache.example.com/",
-        enabled: true,
-      }),
-    ).toEqual({
-      ok: true,
-      data: {
-        serverUrl: "https://cache.example.com",
-        enabled: true,
-        builtInUrl: "",
-        activeUrl: "https://cache.example.com",
-      },
-    });
-
-    const off = (await sendRequest({
-      type: "cache.save",
-      serverUrl: "https://cache.example.com",
-      enabled: false,
-    })) as { data: { activeUrl: string } };
-    expect(off.data.activeUrl).toBe("");
-  });
-
-  it("refuses a server URL that is not usable", async () => {
-    const response = await sendRequest({
-      type: "cache.save",
-      serverUrl: "http://cache.example.com",
-      enabled: true,
-    });
-
-    expect(response.ok).toBe(false);
-    expect(localStorageArea.data["cache.shared"]).toBeUndefined();
-  });
-});
-
-describe("shared cache during a metadata load", () => {
-  const repositories = ["mastra-ai/mastra", "vercel/next.js"];
-
-  async function connect(serverUrl = "https://cache.example.com"): Promise<void> {
-    await sendRequest({
-      type: "auth.save",
-      token: "dedicated-token-value-for-test",
-      remember: false,
-    });
-
-    if (serverUrl) {
-      await sendRequest({ type: "cache.save", serverUrl, enabled: true });
-    }
-  }
-
-  it("serves shared hits without asking GitHub and publishes what it did fetch", async () => {
-    await connect();
-    sharedCacheMocks.lookupSharedMetadata.mockResolvedValue([MASTRA]);
-    clientMocks.fetchRepositoryMetadataBatch.mockResolvedValue({
-      metadata: [NEXT],
-      missing: [],
-      rateLimit: null,
-    });
-
-    const response = (await sendRequest({
-      type: "metadata.load",
-      repositories,
-      refresh: false,
-    })) as { ok: true; data: MetadataLoadResult };
-
-    expect(response.ok).toBe(true);
-    expect(response.data.sharedCachedCount).toBe(1);
-    expect(response.data.cachedCount).toBe(0);
-    expect(response.data.metadata.map((item) => item.nameWithOwner)).toEqual(
-      repositories,
-    );
-    expect(sharedCacheMocks.lookupSharedMetadata).toHaveBeenCalledWith(
-      "https://cache.example.com",
-      repositories,
-    );
-    // Only the repository GitHub actually answered for is offered back.
-    expect(sharedCacheMocks.publishSharedMetadata).toHaveBeenCalledWith(
-      "https://cache.example.com",
-      [NEXT],
-    );
-    expect(
-      clientMocks.fetchRepositoryMetadataBatch.mock.calls[0]?.[0].map(
-        (repository: { nameWithOwner: string }) => repository.nameWithOwner,
-      ),
-    ).toEqual(["vercel/next.js"]);
-  });
-
-  it("keeps a shared hit on this device so the next visit skips the network", async () => {
-    await connect();
-    sharedCacheMocks.lookupSharedMetadata.mockResolvedValue([MASTRA, NEXT]);
-
-    await sendRequest({ type: "metadata.load", repositories, refresh: false });
-    sharedCacheMocks.lookupSharedMetadata.mockResolvedValue([]);
-    const second = (await sendRequest({
-      type: "metadata.load",
-      repositories,
-      refresh: false,
-    })) as { data: MetadataLoadResult };
-
-    expect(second.data.cachedCount).toBe(2);
-    expect(second.data.sharedCachedCount).toBe(0);
-    expect(clientMocks.fetchRepositoryMetadataBatch).not.toHaveBeenCalled();
-  });
-
-  it("does not let a shared record outlive the shared cache's own deadline", async () => {
-    await connect();
-    const sixDaysOld = {
-      ...MASTRA,
-      fetchedAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1_000).toISOString(),
-    };
-    sharedCacheMocks.lookupSharedMetadata.mockResolvedValue([sixDaysOld]);
-
-    await sendRequest({
-      type: "metadata.load",
-      repositories: ["mastra-ai/mastra"],
-      refresh: false,
-    });
-
-    const stored = localStorageArea.data["metadata.mastra-ai/mastra"] as {
-      expiresAt: number;
-    };
-    const oneDay = 24 * 60 * 60 * 1_000;
-    // Six hours would run past the record's seventh day, so it is trimmed to it.
-    expect(stored.expiresAt - Date.now()).toBeGreaterThan(0);
-    expect(stored.expiresAt - Date.now()).toBeLessThan(oneDay);
-  });
-
-  it("still loads from GitHub when the shared server cannot answer", async () => {
-    await connect();
-    sharedCacheMocks.lookupSharedMetadata.mockResolvedValue([]);
-    clientMocks.fetchRepositoryMetadataBatch.mockResolvedValue({
-      metadata: [MASTRA, NEXT],
-      missing: [],
-      rateLimit: null,
-    });
-
-    const response = (await sendRequest({
-      type: "metadata.load",
-      repositories,
-      refresh: false,
-    })) as { data: MetadataLoadResult };
-
-    expect(response.data.metadata).toHaveLength(2);
-    expect(response.data.sharedCachedCount).toBe(0);
-  });
-
-  it("never contacts a shared server that was not configured", async () => {
-    await connect("");
-    clientMocks.fetchRepositoryMetadataBatch.mockResolvedValue({
-      metadata: [MASTRA, NEXT],
-      missing: [],
-      rateLimit: null,
-    });
-
-    await sendRequest({ type: "metadata.load", repositories, refresh: false });
-
-    expect(sharedCacheMocks.lookupSharedMetadata).not.toHaveBeenCalled();
-    expect(sharedCacheMocks.publishSharedMetadata).not.toHaveBeenCalled();
-  });
-
-  it("bypasses both caches on refresh and republishes the fresh answer", async () => {
-    await connect();
-    sharedCacheMocks.lookupSharedMetadata.mockResolvedValue([MASTRA, NEXT]);
-    await sendRequest({ type: "metadata.load", repositories, refresh: false });
-
-    sharedCacheMocks.lookupSharedMetadata.mockClear();
-    clientMocks.fetchRepositoryMetadataBatch.mockResolvedValue({
-      metadata: [MASTRA, NEXT],
-      missing: [],
-      rateLimit: null,
-    });
-
-    const refreshed = (await sendRequest({
-      type: "metadata.load",
-      repositories,
-      refresh: true,
-    })) as { data: MetadataLoadResult };
-
-    expect(sharedCacheMocks.lookupSharedMetadata).not.toHaveBeenCalled();
-    expect(clientMocks.fetchRepositoryMetadataBatch).toHaveBeenCalledTimes(1);
-    expect(refreshed.data.cachedCount).toBe(0);
-    expect(refreshed.data.sharedCachedCount).toBe(0);
-    expect(sharedCacheMocks.publishSharedMetadata).toHaveBeenLastCalledWith(
-      "https://cache.example.com",
-      [MASTRA, NEXT],
-    );
-  });
-});
-
-function createMemoryStorageArea(): MemoryStorageArea {
-  const data: Record<string, unknown> = {};
-  const area = {
-    get: vi.fn(async (keys?: string | string[] | Record<string, unknown> | null) => {
-      if (keys === null || keys === undefined) return { ...data };
-      const names = Array.isArray(keys)
-        ? keys
-        : typeof keys === "string"
-          ? [keys]
-          : Object.keys(keys);
-      return Object.fromEntries(
-        names.flatMap((name) => (name in data ? [[name, data[name]]] : [])),
-      );
-    }),
-    set: vi.fn(async (values: Record<string, unknown>) => {
-      Object.assign(data, values);
-    }),
-    remove: vi.fn(async (keys: string | string[]) => {
-      for (const key of Array.isArray(keys) ? keys : [keys]) delete data[key];
-    }),
-  } as unknown as chrome.storage.StorageArea;
-
+function storage(data: Record<string, unknown> = {}) {
   return {
     data,
-    area,
+    get: vi.fn(async (keys?: string | string[] | null) => {
+      const selected = keys == null ? Object.keys(data) : typeof keys === "string" ? [keys] : keys;
+      return Object.fromEntries(selected.filter((key) => key in data).map((key) => [key, data[key]]));
+    }),
+    set: vi.fn(async (values: Record<string, unknown>) => { Object.assign(data, values); }),
+    remove: vi.fn(async (keys: string | string[]) => { for (const key of typeof keys === "string" ? [keys] : keys) delete data[key]; }),
     setAccessLevel: vi.fn(async () => undefined),
   };
 }
+let local: ReturnType<typeof storage>;
+let session: ReturnType<typeof storage>;
+const root = "safari-web-extension://test/";
+const contentSender = { id: "test", url: "https://github.com/a/list", frameId: 0, tab: { id: 1, url: "https://github.com/a/list" } as chrome.tabs.Tab };
+const tokenSender = { id: "test", url: `${root}token.html` };
+const optionsSender = { id: "test", url: `${root}options.html` };
+const record = (name = "mastra-ai/mastra") => ({
+  nameWithOwner: name, url: `https://github.com/${name}`, description: "Agent framework",
+  stars: 20_000, forks: 1500, openIssues: 125, lastCommitAt: "2026-07-08T12:00:00Z",
+  license: "Apache-2.0", isArchived: false, fetchedAt: new Date().toISOString(),
+});
 
-async function sendRequest(
-  request: ExtensionRequest,
-): Promise<ExtensionResponse<unknown>> {
-  if (!runtimeListener) throw new Error("Background listener was not registered.");
+async function loadBackground() {
+  tabSendMessage = vi.fn();
+  globalThis.chrome = {
+    runtime: {
+      id: "test", getURL: (path: string) => new URL(path, root).href,
+      onMessage: { addListener: (value: Listener) => { listener = value; } },
+      onConnect: { addListener: (value: typeof connect) => { connect = value; } },
+    },
+    action: {
+      onClicked: { addListener: (value: typeof click) => { click = value; } },
+      setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn(),
+    },
+    scripting: { executeScript: vi.fn() }, tabs: { sendMessage: tabSendMessage }, storage: { local, session },
+  } as unknown as typeof chrome;
+  await import("./background");
+}
 
-  return new Promise((resolve, reject) => {
-    const keepAlive = runtimeListener?.(
-      request,
-      {
-        tab: { url: "https://github.com/sindresorhus/awesome" } as chrome.tabs.Tab,
-      },
-      resolve,
-    );
+beforeEach(async () => {
+  vi.resetModules();
+  vi.stubGlobal("indexedDB", new IDBFactory());
+  client.validateGitHubToken.mockReset().mockResolvedValue("octocat");
+  client.fetchRepositoryMetadataBatch.mockReset().mockImplementation(async (repos) => ({
+    metadata: repos.map((repo: { nameWithOwner: string }) => record(repo.nameWithOwner)), missing: [], rateLimit: null,
+  }));
+  client.fetchRepositoryReadme.mockReset().mockResolvedValue("# Awesome");
+  local = storage(); session = storage();
+  await loadBackground();
+});
 
-    if (!keepAlive) reject(new Error("Background rejected the GitHub sender."));
+function request(message: ExtensionRequest, sender: chrome.runtime.MessageSender = contentSender) {
+  return new Promise<ExtensionResponse<unknown>>((resolve, reject) => {
+    if (!listener(message, sender, resolve)) reject(new Error("Sender rejected"));
   });
 }
+async function authenticate(remember = false) {
+  return request({ type: "auth.save", token: "dedicated-test-token-value", remember }, tokenSender);
+}
+function port(sender: chrome.runtime.MessageSender = contentSender) {
+  let message: (value: unknown) => void = () => undefined;
+  let disconnect: () => void = () => undefined;
+  const postMessage = vi.fn();
+  const result = {
+    name: METADATA_PORT_NAME, sender, postMessage,
+    onMessage: { addListener: (next: typeof message) => { message = next; } },
+    onDisconnect: { addListener: (next: typeof disconnect) => { disconnect = next; } },
+    disconnect: vi.fn(() => disconnect()),
+  };
+  connect(result as unknown as chrome.runtime.Port);
+  return { ...result, send: (value: unknown) => message(value), drop: () => disconnect() };
+}
+async function eventually(predicate: () => boolean) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Timed out waiting for background progress");
+}
+
+describe("background authorization and tokens", () => {
+  it("accepts Safari token-frame messages without a tab and never returns the token", async () => {
+    const reply = await authenticate();
+    expect(reply).toEqual({ ok: true, data: { hasToken: true, remembered: false, login: "octocat" } });
+    expect(JSON.stringify(reply)).not.toContain("dedicated-test-token-value");
+    expect(session.data["auth.githubToken"]).toBe("dedicated-test-token-value");
+    expect(local.data["auth.githubToken"]).toBeUndefined();
+  });
+  it("stores remembered credentials outside content-script storage", async () => {
+    expect(await authenticate(true)).toEqual({ ok: true, data: { hasToken: true, remembered: true, login: "octocat" } });
+    expect(session.data["auth.githubToken"]).toBeUndefined();
+    expect(local.data["auth.githubToken"]).toBeUndefined();
+    await request({ type: "auth.clear" });
+    expect(await request({ type: "auth.status" })).toEqual({ ok: true, data: { hasToken: false, remembered: false, login: null } });
+  });
+  it("rejects writes from content scripts, other extensions, and unrecognized extension pages", () => {
+    const reply = vi.fn();
+    expect(listener({ type: "auth.save", token: "bad", remember: true }, contentSender, reply)).toBe(false);
+    expect(listener({ type: "auth.status" }, { ...contentSender, id: "other" }, reply)).toBe(false);
+    expect(listener({ type: "auth.save" }, { url: `${root}other.html` }, reply)).toBe(false);
+    expect(reply).not.toHaveBeenCalled();
+  });
+  it("cancels pending token validation when the user disconnects", async () => {
+    let finish!: (login: string) => void;
+    client.validateGitHubToken.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const saving = authenticate();
+    await eventually(() => Boolean(finish));
+    await request({ type: "auth.clear" });
+    finish("octocat");
+    expect((await saving).ok).toBe(false);
+    expect(await request({ type: "auth.status" })).toMatchObject({ data: { hasToken: false } });
+  });
+  it("ignores toolbar clicks outside GitHub", async () => {
+    await click({ id: 1, url: "https://example.com/" } as chrome.tabs.Tab);
+    expect(tabSendMessage).not.toHaveBeenCalled();
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+  it("injects the top frame when presence detection rejects", async () => {
+    tabSendMessage
+      .mockRejectedValueOnce(new Error("No listener"))
+      .mockResolvedValueOnce("awesomer.ready");
+    await click(contentSender.tab);
+    expect(tabSendMessage).toHaveBeenNthCalledWith(1, 1, { type: "awesomer.ping" }, { frameId: 0 });
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith({ target: { tabId: 1, frameIds: [0] }, files: ["content.js"] });
+    expect(tabSendMessage).toHaveBeenNthCalledWith(2, 1, { type: "awesomer.toggle" }, { frameId: 0 });
+  });
+  it("injects when Safari resolves missing presence with undefined", async () => {
+    tabSendMessage
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce("awesomer.ready");
+    await click(contentSender.tab);
+    expect(chrome.scripting.executeScript).toHaveBeenCalledOnce();
+  });
+  it("toggles without injection when the content listener acknowledges presence", async () => {
+    tabSendMessage.mockResolvedValue("awesomer.ready");
+    await click(contentSender.tab);
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+    expect(tabSendMessage).toHaveBeenCalledTimes(2);
+    expect(tabSendMessage).toHaveBeenLastCalledWith(1, { type: "awesomer.toggle" }, { frameId: 0 });
+  });
+  it("opens the toolbar UI when token-vault initialization fails", async () => {
+    vi.resetModules();
+    local = storage();
+    session = storage();
+    session.setAccessLevel.mockRejectedValue(new Error("Session storage unavailable"));
+    await loadBackground();
+    tabSendMessage.mockResolvedValue("awesomer.ready");
+
+    await click(contentSender.tab);
+
+    expect(tabSendMessage).toHaveBeenCalledTimes(2);
+    expect(tabSendMessage).toHaveBeenLastCalledWith(1, { type: "awesomer.toggle" }, { frameId: 0 });
+    expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({ tabId: 1, text: "" });
+  });
+  it("serializes rapid clicks so injection cannot overlap", async () => {
+    let finishPing!: (response: unknown) => void;
+    tabSendMessage
+      .mockImplementationOnce(() => new Promise((resolve) => { finishPing = resolve; }))
+      .mockResolvedValue("awesomer.ready");
+
+    const first = click(contentSender.tab);
+    const second = click(contentSender.tab);
+    await eventually(() => Boolean(finishPing));
+    expect(tabSendMessage).toHaveBeenCalledTimes(1);
+
+    finishPing(undefined);
+    await Promise.all([first, second]);
+    expect(chrome.scripting.executeScript).toHaveBeenCalledOnce();
+    expect(tabSendMessage).toHaveBeenCalledTimes(4);
+  });
+  it("shows an error badge when content injection fails", async () => {
+    tabSendMessage.mockResolvedValueOnce(undefined);
+    vi.mocked(chrome.scripting.executeScript).mockRejectedValueOnce(new Error("Injection denied"));
+    await click(contentSender.tab);
+    expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({ tabId: 1, text: "!" });
+    expect(chrome.action.setBadgeBackgroundColor).toHaveBeenCalledWith({ tabId: 1, color: "#b42318" });
+  });
+});
+
+describe("local metadata workflow", () => {
+  it("reuses cache and allows options to clear only metadata", async () => {
+    await authenticate();
+    const load: ExtensionRequest = { type: "metadata.load", repositories: ["mastra-ai/mastra"], refresh: false };
+    expect((await request(load)).ok).toBe(true);
+    expect(await request(load)).toMatchObject({ ok: true, data: { cachedCount: 1, pendingCount: 0, complete: true } });
+    expect(client.fetchRepositoryMetadataBatch).toHaveBeenCalledTimes(1);
+    expect(await request({ type: "cache.status" }, optionsSender)).toMatchObject({ ok: true, data: { entries: 1 } });
+    expect(await request({ type: "cache.clear" }, optionsSender)).toMatchObject({ ok: true, data: { entries: 0 } });
+    expect(session.data["auth.githubToken"]).toBe("dedicated-test-token-value");
+    expect(listener({ type: "cache.save", serverUrl: "https://server.test" }, optionsSender, vi.fn())).toBe(false);
+  });
+  it("emits cached data before GitHub and sends a final snapshot", async () => {
+    await authenticate();
+    const cached = { ...record(), fetchedAt: new Date(Date.now() - 7 * 3600_000).toISOString() };
+    local.data["metadata.mastra-ai/mastra"] = { value: cached, expiresAt: Date.now() - 3600_000 };
+    let finish!: (value: unknown) => void;
+    client.fetchRepositoryMetadataBatch.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const stream = port();
+    stream.send({ type: "metadata.load", repositories: ["mastra-ai/mastra"], refresh: false });
+    await eventually(() => stream.postMessage.mock.calls.length > 0 && Boolean(finish));
+    expect(stream.postMessage.mock.calls[0]?.[0]).toMatchObject({ ok: true, data: { metadata: [cached], staleCount: 1, complete: false } });
+    finish({ metadata: [{ ...record(), stars: 20001 }], missing: [], rateLimit: null });
+    await eventually(() => stream.postMessage.mock.calls.some(([value]) => value.data?.complete));
+    expect(stream.postMessage.mock.lastCall?.[0]).toMatchObject({ data: { complete: true, staleCount: 0, metadata: [expect.objectContaining({ stars: 20001 })] } });
+  });
+  it("rejects unauthorized ports and malformed metadata requests", async () => {
+    expect(port(tokenSender).disconnect).toHaveBeenCalled();
+    const stream = port();
+    stream.send({ type: "metadata.load", repositories: ["../evil"], refresh: false });
+    await eventually(() => stream.postMessage.mock.calls.length > 0);
+    expect(stream.postMessage.mock.lastCall?.[0]).toMatchObject({ ok: false });
+    expect(client.fetchRepositoryMetadataBatch).not.toHaveBeenCalled();
+  });
+  it("stops additional batches and messages after the modal disconnects", async () => {
+    await authenticate();
+    let finish!: (value: unknown) => void;
+    client.fetchRepositoryMetadataBatch.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const names = Array.from({ length: 21 }, (_, index) => `owner/repo-${index}`);
+    const stream = port();
+    stream.send({ type: "metadata.load", repositories: names, refresh: false });
+    await eventually(() => Boolean(finish));
+    stream.drop();
+    const count = stream.postMessage.mock.calls.length;
+    finish({ metadata: names.slice(0, 20).map(record), missing: [], rateLimit: null });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(client.fetchRepositoryMetadataBatch).toHaveBeenCalledTimes(1);
+    expect(stream.postMessage).toHaveBeenCalledTimes(count);
+  });
+});

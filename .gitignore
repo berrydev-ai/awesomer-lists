@@ -1,3 +1,6 @@
 node_modules/
 dist/
+dist-safari/
+safari/generated/
+safari/build/
 *.log

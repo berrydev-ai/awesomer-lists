@@ -8,9 +8,7 @@ const params = new URLSearchParams(location.search);
 const isPreview = params.get("preview") === "1";
 const theme = params.get("theme");
 const accent = params.get("accent") ?? "indigo";
-const parentOrigin = document.referrer
-  ? new URL(document.referrer).origin
-  : "*";
+const parentOrigin = isPreview ? location.origin : "https://github.com";
 
 document.documentElement.dataset.theme =
   theme === "light" || theme === "dark" ? theme : "system";
@@ -125,6 +123,9 @@ async function sendRequest<T>(request: ExtensionRequest): Promise<T> {
 
 void sendRequest<AuthStatus>({ type: "auth.status" }).then((auth) => {
   rememberToken.checked = auth.remembered;
+}).catch(() => {
+  tokenError.textContent = "Could not read token settings. Try saving your token again.";
+  tokenError.hidden = false;
 });
 
 form.addEventListener("submit", async (event) => {

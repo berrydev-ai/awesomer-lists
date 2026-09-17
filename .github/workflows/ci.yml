@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   check:
-    name: Test, typecheck, build
+    name: Test, typecheck, build web bundles
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -35,15 +35,49 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build
-        run: npm run build
+      - name: Build Chrome and Safari web bundles
+        run: npm run build:all
 
-      - name: Check the built extension
-        run: node scripts/check-dist.mjs
+      - name: Check Chrome and Safari web bundles
+        run: npm run verify:all
 
-      - name: Upload the unpacked extension
+      - name: Upload Chrome unpacked extension
         uses: actions/upload-artifact@v7
         with:
-          name: awesomer-lists-unpacked
+          name: awesomer-lists-chrome-unpacked
           path: dist
+          retention-days: 14
+
+      - name: Upload Safari web extension resources
+        uses: actions/upload-artifact@v7
+        with:
+          name: awesomer-lists-safari-web-extension
+          path: dist-safari
+          retention-days: 14
+
+  safari-native:
+    name: Package and build Safari native project
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate and build unsigned macOS project
+        run: npm run safari:native-build
+
+      - name: Upload generated Xcode project and unsigned build
+        uses: actions/upload-artifact@v7
+        with:
+          name: awesomer-lists-safari-native
+          path: |
+            safari/generated
+            safari/build
           retention-days: 14

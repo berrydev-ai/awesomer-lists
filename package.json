@@ -5,20 +5,27 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "check": "npm run test && npm run typecheck && npm run build && npm run verify",
+    "build": "node scripts/build.mjs --target chrome",
+    "build:safari": "node scripts/build.mjs --target safari",
+    "build:all": "npm run build && npm run build:safari",
+    "check": "npm run test && npm run typecheck && npm run build:all && npm run verify:all",
     "dev": "node scripts/preview.mjs --hot",
     "preview": "node scripts/preview.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "safari:package": "npm run build:safari && npm run verify:safari && node scripts/safari-package.mjs",
+    "safari:native-build": "npm run safari:package && node scripts/safari-build.mjs",
     "typecheck": "tsc --noEmit",
-    "verify": "node scripts/check-dist.mjs"
+    "verify": "node scripts/check-dist.mjs --target chrome",
+    "verify:safari": "node scripts/check-dist.mjs --target safari",
+    "verify:all": "npm run verify && npm run verify:safari"
   },
   "devDependencies": {
     "@fontsource/geist": "5.3.0",
     "@fontsource/geist-mono": "5.3.0",
     "@types/chrome": "0.2.9",
     "esbuild": "0.28.2",
+    "fake-indexeddb": "6.2.5",
     "happy-dom": "20.14.3",
     "typescript": "7.0.2",
     "vitest": "4.1.11"

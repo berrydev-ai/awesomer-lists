@@ -2,49 +2,45 @@
 
 All notable changes to this project are documented here.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
-this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-The extension version in `public/manifest.json` and the `version` in
-`package.json` are kept in step, and a release is the tag `vX.Y.Z`.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The extension version in `public/manifest.json` and the `version` in `package.json` are kept in step, and a release is the tag `vX.Y.Z`.
 
 ## [Unreleased]
 
-Nothing has been released yet. Everything below ships in the first tagged
-version.
+Nothing has been released yet. Everything below ships in the first tagged version.
 
 ### Added
 
-- Sortable, grouped table of the projects in a GitHub Awesome list, with stars,
-  forks, latest default-branch commit, open issues excluding pull requests,
-  license, and archived state.
+- Safari web-extension build and macOS packaging from the same source as Chrome.
+- Progressive results that show cached records before refresh requests finish.
+- Local cache cleanup, a 25 MiB metadata budget, and least-recently-used eviction.
+- Saved progress after each successful batch, shared pending requests across tabs, and GitHub rate-limit pauses.
+- Local cache usage and a clear control that preserves credentials.
+- Extension-origin IndexedDB for remembered tokens, with migration from earlier local storage.
+
+- Sortable, grouped table of the projects in a GitHub Awesome list, with stars, forks, latest default-branch commit, open issues excluding pull requests, license, and archived state.
 - A plain maintenance label for each project: Active, Quiet, Stale, or Archived.
-- Section grouping that mirrors the README heading hierarchy, shown as
-  `Parent › Child` for nested headings, with sorting applied inside each section.
-- Search and filters across project names, descriptions, repository names, and
-  sections.
-- README reading from the repository root through GitHub's API, and from the raw
-  source when a rendered Markdown file is open.
-- Fine-grained token flow, stored in session storage by default with an opt-in
-  **Remember on this device**. The token is sent only to `api.github.com` and
-  cannot be read back by page code.
-- GraphQL batching so one request loads many projects with exact issue-only and
-  default-branch commit data.
+- Section grouping that mirrors the README heading hierarchy, shown as `Parent › Child` for nested headings, with sorting applied inside each section.
+- Search and filters across project names, descriptions, repository names, and sections.
+- README reading from the repository root through GitHub's API, and from the raw source when a rendered Markdown file is open.
+- Fine-grained token flow, stored in session storage by default with an opt-in **Remember on this device**. The token is sent only to `api.github.com` and cannot be read back by page code.
+- GraphQL batching so one request loads many projects with exact issue-only and default-branch commit data.
 - Six-hour repository metadata cache in extension storage.
-- Optional shared cache server, a Cloudflare Worker in `server/` holding public
-  counters for seven days, with **Refresh data** to bypass both caches.
-- Options page for the shared cache server URL, which requests the host as an
-  optional permission when set after install.
-- UI preview at `npm run preview`, and `npm run dev` for the same preview with
-  automatic rebuild and browser reload.
+- UI preview at `npm run preview`, and `npm run dev` for the same preview with automatic rebuild and browser reload.
+
+### Changed
+
+- Current Chrome and Safari builds fetch data directly from GitHub and store cache records on the device. They no longer contact the optional shared-cache server.
+- Removed arbitrary optional host permissions. The legacy Worker remains in `server/` for older builds.
 
 ### Fixed
 
-- Awesome lists that lay projects out in Markdown tables are parsed, and
-  repositories that no longer exist are skipped instead of failing the load.
+- Toolbar actions confirm that the page script is ready before opening the modal in Safari or Chrome.
+- Renamed and transferred repositories retain the README link as their cache key, so GitHub redirects do not interrupt a metadata batch.
+- Token-frame and options-page messages work without a GitHub tab in their sender information.
+
+- Awesome lists that lay projects out in Markdown tables are parsed, and repositories that no longer exist are skipped instead of failing the load.
 - Project counts stay unique, and totals and sources match what GitHub returns.
-- Angle brackets in prose survive. A description reading `A C++ <-> Lua API
-  wrapper` kept its arrow instead of losing it as though it were a tag.
-- Inline HTML in a project name is removed, so a title written as
-  `<b>Name</b>` shows as `Name`, matching how anchor titles already behaved.
+- Angle brackets in prose survive. A description reading `A C++ <-> Lua API wrapper` kept its arrow instead of losing it as though it were a tag.
+- Inline HTML in a project name is removed, so a title written as `<b>Name</b>` shows as `Name`, matching how anchor titles already behaved.
 
 [unreleased]: https://github.com/berrydev-ai/awesomer-lists/commits/main
