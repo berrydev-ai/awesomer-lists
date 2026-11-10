@@ -10,6 +10,7 @@ Nothing has been released yet. Everything below ships in the first tagged versio
 
 ### Added
 
+- Hover tooltips that show the full project description.
 - Safari web-extension build and macOS packaging from the same source as Chrome.
 - Progressive results that show cached records before refresh requests finish.
 - Local cache cleanup, a 25 MiB metadata budget, and least-recently-used eviction.

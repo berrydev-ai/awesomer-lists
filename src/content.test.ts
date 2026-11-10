@@ -64,6 +64,7 @@ const defaultResult = (): MetadataLoadResult => ({
 
 beforeEach(async () => {
   vi.restoreAllMocks();
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-10T12:00:00Z"));
   vi.resetModules();
   document.getElementById("awesomer-lists-extension-root")?.remove();
   (
