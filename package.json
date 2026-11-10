@@ -28,6 +28,6 @@
     "fake-indexeddb": "6.2.5",
     "happy-dom": "20.14.0",
     "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "vitest": "5.0.0"
   }
 }
