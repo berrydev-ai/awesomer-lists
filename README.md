@@ -17,6 +17,8 @@ Awesomer Lists is a Chrome and Safari extension that turns a GitHub Awesome list
 
 Search and filters work across project names, descriptions, repository names, and README sections. Sorting happens inside each section, so the list keeps its original structure.
 
+Hover over a project description to read its full text.
+
 ## Build locally
 
 Use Node 24. Install the dependencies and build both browser packages:

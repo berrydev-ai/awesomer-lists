@@ -1484,6 +1484,7 @@ async function openModal(): Promise<void> {
         description.className = "description";
         description.textContent =
           row.description || row.metadata?.description || "No description provided.";
+        description.title = description.textContent;
         projectCell.append(projectLine, description);
 
         const maintenanceCell = document.createElement("div");
